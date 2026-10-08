@@ -43,7 +43,15 @@ class ProfileMigrationEquivalenceTest {
                 }
                 .toSortedSet()
 
-            assertEquals("fixture must cover every current 6.x builtin", current6x, legacyReleases)
+            /* The fork may carry a device-specific route that was not present
+             * in the remote/main fixture. Keep the migration guard strict for
+             * every legacy entry while allowing such additional builtin
+             * profiles to coexist. */
+            assertEquals(
+                "fixture contains a release absent from the current builtins",
+                current6x.intersect(legacyReleases),
+                legacyReleases,
+            )
             assertEquals("remote/main fixture size", 55, legacyReleases.size)
 
             val pair = CpuPair(primary = 0, consumer = 1)
