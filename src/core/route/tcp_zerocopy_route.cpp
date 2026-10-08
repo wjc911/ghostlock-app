@@ -1,5 +1,6 @@
 #include "route/tcp_zerocopy_route.h"
 
+#include <sched.h>
 #include <sys/mman.h>
 
 #if defined(__ANDROID__)
@@ -44,11 +45,15 @@ namespace ghostlock::route::tcp_zerocopy {
         punch_go.store(0);
         punch_stop.store(1);
         while (race->consumer_inflight.load()) {
+#if defined(__aarch64__)
             __asm__ volatile (
 
 
             "yield"
             ::: "memory");
+#else
+            sched_yield();
+#endif
         }
         status.kernel_disarmed = 1;
     }
