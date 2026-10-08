@@ -44,6 +44,9 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
         const val UserProfilesDirectoryName = "user_profiles"
         const val EditSessionPreferences = "ghostlock_edit_session"
         const val ExtractBinaryName = "libextract.so"
+        const val Opd2515PreloadBinaryName = "libopd2515_preload.so"
+        const val Opd2515Release =
+            "6.12.58-android16-6-g7704a1ae279b-ab15213644-4k"
         const val DefaultDebugLocation = "Download/ghostlock-debug-log"
         const val PrefForceAttackTest = "force_attack_test"
         const val PrefDebugExportEnabled = "debug_export_enabled"
@@ -609,6 +612,14 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
             if (safeModeEnabled) {
                 profileBlob = NativeProfileDocument.patchSafeMode(profileBlob) ?: profileBlob
             }
+            if (shouldUseOpd2515Preloader(release, config)) {
+                onLog("<b> OPD2515 exact preloader selected")
+                dumpRuntimeProfile(onLog, writeSidecar, release, pair, profileBlob)
+                resetRunState()
+                val preloaderCode = runOpd2515Preloader(onLog)
+                if (preloaderCode == 0) clearRunState()
+                return preloaderCode
+            }
             dumpRuntimeProfile(onLog, writeSidecar, release, pair, profileBlob)
             val ksuOffset = AtomicLong()
             val nativeOffset = AtomicLong()
@@ -682,6 +693,70 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
             onLog("<-> error: ${error::class.simpleName}: ${error.message}")
             1
         }
+    }
+
+    /**
+     * The Pad Mini's exact kernel has a separately built result-set preloader.
+     * Keep the selection tied to the resolved profile and release so imported
+     * offsets or another device can never silently run this target-specific
+     * payload.
+     */
+    private fun shouldUseOpd2515Preloader(release: String, config: ProfileConfig): Boolean {
+        if (release != Opd2515Release || config.route != "result_stack") return false
+        val model = Build.MODEL.trim()
+        if (model != "OPD2515") return false
+        return File(
+            appContext.applicationInfo.nativeLibraryDir,
+            Opd2515PreloadBinaryName,
+        ).isFile
+    }
+
+    /** Runs the exact OPD2515 temporary-root preloader from the app UID. */
+    private suspend fun runOpd2515Preloader(onLog: (String) -> Unit): Int {
+        val binary = File(
+            appContext.applicationInfo.nativeLibraryDir,
+            Opd2515PreloadBinaryName,
+        )
+        require(binary.isFile) { "missing OPD2515 preloader: ${binary.absolutePath}" }
+        val rootSeen = AtomicReference(false)
+        val command = ProcessBuilder("/system/bin/id")
+            .directory(filesDir)
+            .redirectErrorStream(true)
+            .apply {
+                environment()["LD_PRELOAD"] = binary.absolutePath
+                environment()["GHOSTLOCK_HOME"] = filesDir.absolutePath
+                environment()["TMPDIR"] = filesDir.absolutePath
+                environment()["HOME"] = filesDir.absolutePath
+                environment()["GHOSTLOCK_CLIENT_UID"] = android.os.Process.myUid().toString()
+            }
+        onLog("<b> starting OPD2515 preloader: ${binary.absolutePath}")
+        val code = runProcess(
+            command,
+            onLog = { line ->
+                if (line.contains("direct-root-summary root=1")) rootSeen.set(true)
+                onLog("[opd2515] $line")
+            },
+            timeoutSeconds = 120,
+            captureOutput = true,
+        )
+        val probeSeen = AtomicReference(false)
+        val probeCode = if (code == 0 && rootSeen.get()) {
+            runProcess(
+                ProcessBuilder("/data/local/tmp/su", "-c", "id")
+                    .directory(filesDir)
+                    .redirectErrorStream(true),
+                onLog = { line ->
+                    if (line.contains("uid=0(root)")) probeSeen.set(true)
+                    onLog("[opd2515-su] $line")
+                },
+                timeoutSeconds = 10,
+            )
+        } else {
+            -1
+        }
+        val success = code == 0 && rootSeen.get() && probeCode == 0 && probeSeen.get()
+        onLog("<b> OPD2515 preloader exited code=$code su_probe=$probeCode root=$success")
+        return if (success) 0 else 1
     }
 
     override suspend fun readDocument(uri: String): String =

@@ -106,3 +106,48 @@ flowchart TD
 - [x] 批次 A 实现（待 CI 编译验证）
 - [ ] 批次 A/B 主机验证
 - [ ] 批次 C 真机门禁
+
+## 批次 D：OPD2515 应用入口（补充设计，2026-10-09）
+
+批次 C 的真机结果显示，现有 `result_stack` native route 在普通应用入口
+会先触发 OPPO 的 `oplus_kevent`，随后由 `OplusAntiRootDialogService`
+重启设备；而独立的、同一内核构建生成的 preloader 在应用 UID 10045
+环境中可以完成 uid 0。批次 D 因此增加一个精确版本的应用入口，不再把
+失败的通用 route 当作 OPD2515 的唯一入口。
+
+### 设计决定
+
+- 将可重建的 OPD2515 preloader C 源码和精确 target header 放入 fork 的
+  `tools/opd2515_preload/`，由 GitHub Actions 使用 ONDK 生成
+  `libopd2515_preload.so`；不提交预编译 exploit 二进制。
+- APK 仅在内置 OPD2515 release profile 命中时选择该入口；其他 profile
+  继续使用原有 native route，不改变已有设备行为。
+- preloader 进程通过 `LD_PRELOAD=/.../libopd2515_preload.so`
+  启动 `/system/bin/id`，成功后在 `/data/local/tmp` 提供临时 daemon。
+- root handoff 的第一阶段只报告 uid 0、SELinux 和 daemon 状态，并记录
+  精确日志；KernelSU 加载仍沿用已有显式脚本，不与普通 route 混合。
+- 取得 root 后，OPD2515 专用 preloader 会停止当前
+  `com.oplus.exsystemservice` 进程，避免已确认的 anti-root 15 秒计时器
+  在 root 成功后触发重启。该停止状态只存在于本次开机，重启后自然清除。
+
+### 入口数据流
+
+```mermaid
+flowchart TD
+    A[exact OPD2515 profile] --> B[packaged arm64 preloader]
+    B --> C[LD_PRELOAD /system/bin/id]
+    C --> D[uid 0 + SELinux permissive]
+    D --> E[temporary su daemon]
+    E --> F[stop ExSystemService anti-root timer]
+    F --> G[report root handoff]
+```
+
+### 验证门槛
+
+- 编译 preloader 与 APK 的 host/CI 构建必须可重复；检查 target header、
+  ELF 架构和 SHA-256。
+- 真机冷机门禁必须分别记录：应用 UID 直接入口、root/daemon、
+  ExSystemService 状态、重启后无 daemon；任何 kernel panic/reboot 均为
+  FAIL，不自动重试。
+- 旧的 `result_stack` 入口保留为实验路径，直到新入口完成上述门禁；不把
+  失败批次标为 supported。

@@ -126,6 +126,33 @@ tasks.register<Copy>("prepareGhostlockJniLibs") {
     }
 }
 
+tasks.register<Exec>("buildOpd2515Preload") {
+    description = "buildOpd2515Preload"
+    val ndk = resolveNdkDir()
+    workingDir(file("tools/opd2515_preload"))
+    commandLine(
+        "make", "clean", "preload",
+        "API=35",
+        "NDK_ROOT=$ndk",
+        "NDK_PREBUILT=linux-x86_64",
+        "NDK_TOOLCHAIN=$ndk/toolchains/llvm/prebuilt/linux-x86_64",
+    )
+    environment("ANDROID_NDK_HOME", ndk)
+    inputs.files(
+        fileTree("tools/opd2515_preload/src") { include("**/*.c", "**/*.h", "**/*.S") },
+        file("tools/opd2515_preload/Makefile"),
+    )
+    outputs.file(file("tools/opd2515_preload/build/bin/preload.so"))
+}
+
+tasks.register<Copy>("prepareOpd2515PreloadJniLibs") {
+    description = "prepareOpd2515PreloadJniLibs"
+    dependsOn("buildOpd2515Preload")
+    from("tools/opd2515_preload/build/bin/preload.so")
+    into("app/src/main/jniLibs/arm64-v8a")
+    rename { "libopd2515_preload.so" }
+}
+
 tasks.register<Exec>("buildGhostlockExtract") {
     description = "buildGhostlockExtract"
     val tools = extractNdkTools()

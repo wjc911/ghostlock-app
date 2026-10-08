@@ -176,6 +176,7 @@ tasks.matching { task ->
         (task.name.startsWith("merge") && task.name.endsWith("NativeLibs"))
 }.configureEach {
     dependsOn(rootProject.tasks.named("prepareGhostlockJniLibs"))
+    dependsOn(rootProject.tasks.named("prepareOpd2515PreloadJniLibs"))
     dependsOn(rootProject.tasks.named("prepareGhostlockExtractJniLibs"))
 }
 
