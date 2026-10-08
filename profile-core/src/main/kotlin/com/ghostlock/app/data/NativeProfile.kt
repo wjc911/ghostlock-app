@@ -349,7 +349,13 @@ data class NativeProfileDocument(
             fun vulOrNull(path: String): ULong? = value(path)?.toULong()
             fun vbOrNull(path: String): UByte? = value(path)?.toUByte()
             val routeConfig = RouteKind.fromToken(route)?.buildConfig(value) ?: NoRouteConfig
-            val routeExecutionPrefix = route?.let { "execution.routes.$it" }
+            /* The shared consumer cadence historically lived under the select
+             * branch for every existing route. Keep that wire contract intact;
+             * result_stack is the only new route with an independent preset. */
+            val routeExecutionPrefix = when (route) {
+                "result_stack" -> "execution.routes.result_stack"
+                else -> "execution.routes.select_stack"
+            }
             return NativeProfileDocument(
                 release = release,
                 routeKind = routeKind(route),
