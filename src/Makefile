@@ -208,11 +208,12 @@ $(HOST_BUILD_DIR)/route_status_test: core/tests/route_status_test.cpp core/route
 $(HOST_BUILD_DIR)/result_stack_route_test: core/tests/result_stack_route_test.cpp \
   core/route/result_stack_route.h core/route/result_stack_route.cpp \
   core/support/native_resource.cpp core/support/native_resource.hpp \
-  core/support/native_result.hpp core/race/pi_race.h core/memory/payload_builder.h \
+  core/support/native_result.hpp core/race/pi_race.cpp core/race/pi_race.h \
+  core/memory/payload_builder.h \
   core/profile/model.h core/route/route_status.h
 	@mkdir -p $(HOST_BUILD_DIR)
 	$(HOST_CXX) $(HOST_CXXFLAGS) -pthread -Icore $< core/route/result_stack_route.cpp \
-	  core/support/native_resource.cpp -o $@
+	  core/race/pi_race.cpp core/support/native_resource.cpp -o $@
 
 $(HOST_BUILD_DIR)/runtime_time_test: core/tests/runtime_time_test.cpp core/support/time.h
 	@mkdir -p $(HOST_BUILD_DIR)
