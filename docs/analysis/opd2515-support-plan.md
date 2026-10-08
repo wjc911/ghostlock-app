@@ -102,7 +102,7 @@ flowchart TD
 
 - [x] 完成 OPD2515 exact kernel 和 preloader 路径静态对照
 - [x] 确认现有 route 无 result-set 支持
-- [ ] 用户认可本计划
-- [ ] 批次 A 实现
+- [x] 用户认可本计划
+- [x] 批次 A 实现（待 CI 编译验证）
 - [ ] 批次 A/B 主机验证
 - [ ] 批次 C 真机门禁

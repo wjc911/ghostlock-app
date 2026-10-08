@@ -81,8 +81,12 @@ jobs:
         run: |
           export ANDROID_NDK_HOME="${{ runner.temp }}/ondk"
           export NDK_ROOT="$ANDROID_NDK_HOME"
+          make -C src native-host-tests
           make -C src ghostlock
           "${{ runner.temp }}/ondk/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" --strip-all build/native/ghostlock || true
+
+      - name: Test profile and app wiring
+        run: ./gradlew :profile-core:test :app:testDebugUnitTest --no-daemon
 
       - name: Build Release APK
         run: |
@@ -93,7 +97,7 @@ jobs:
           export KEYSTORE_PASS="${{ secrets.KEY_STORE_PASSWORD }}"
           export KEY_ALIAS="${{ secrets.ALIAS }}"
           export KEY_PASSWORD="${{ secrets.KEY_PASSWORD }}"
-          ./gradlew :app:assembleRelease --no-daemon
+          ./gradlew :app:assembleRelease -PforkApplicationId=com.ghostlock.opd2515 --no-daemon
 
       - name: Strip Ghostlock binary
         run: |

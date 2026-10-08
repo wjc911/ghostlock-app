@@ -278,6 +278,10 @@ namespace ghostlock::route {
         }
     }
 
+    const std::array<int32_t, 3> &standard_io_backup_values(void) {
+        return standard_io_backup;
+    }
+
     static void restore_standard_io(const std::array<support::BorrowedFd, 3> &backup) {
         for (size_t fd = 0; fd < backup.size(); fd++) {
             if (!backup[fd].valid()) continue;

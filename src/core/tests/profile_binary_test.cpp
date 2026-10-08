@@ -130,7 +130,19 @@ int32_t main(void) {
     assert(parsed.execution.race_route_done_timeout_ms == 300000);
     assert(parsed.execution.handoff_enforce_poll_interval_ms == 100);
     assert(parsed.geometry.mcast_waiter_off.value_or(-1) == 96);
-    assert(parsed.geometry.mcast_buffer_size.value_or(0) == 512);
+        assert(parsed.geometry.mcast_buffer_size.value_or(0) == 512);
+
+        profile::kernel_offsets result = {};
+        result.uname_r = "result-stack";
+        result.route = ghostlock::profile::kRouteResultStack;
+        result.geometry.pselect_waiter_shift = 14;
+        result.execution.select_consumer_max_calls = 1;
+        result.execution.select_consumer_burst_calls = 1;
+        assert(round_trip(result, &parsed, release, sizeof(release)) == 0);
+        assert(parsed.route == ghostlock::profile::kRouteResultStack);
+        assert(parsed.geometry.pselect_waiter_shift.value_or(0) == 14);
+        assert(parsed.execution.select_consumer_max_calls == 1);
+        assert(parsed.execution.select_consumer_burst_calls == 1);
 
     /* ---- Strict values and presence. ---- */
     {
@@ -270,7 +282,7 @@ int32_t main(void) {
             doc[5] = static_cast<char>(version >> 8);
             assert(parse_doc(doc, &parsed, release, sizeof(release)) == -1);
         }
-        for (int route : {0, 4, 99}) {
+        for (int route : {0, 99}) {
             const std::string doc = build_doc(static_cast<uint8_t>(route), "r", {});
             assert(parse_doc(doc, &parsed, release, sizeof(release)) == -1);
         }

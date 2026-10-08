@@ -160,6 +160,15 @@ internal class AndroidProfileConfigController(
                 }
             }
 
+            "result_stack" -> {
+                val shift = value("$routePrefix.waiter_shift")
+                if (shift == null ||
+                    shift < Int.MIN_VALUE.toLong() || shift > Int.MAX_VALUE.toLong()
+                ) {
+                    invalid += "$routePrefix.waiter_shift"
+                }
+            }
+
             "multicast_waiter" -> {
                 for (field in RouteMulticastFields) {
                     val current = value("$routePrefix.$field")
@@ -212,6 +221,15 @@ internal class AndroidProfileConfigController(
                 }
 
                 "select_stack" -> {
+                    val shift = value("$fallbackPrefix.waiter_shift")
+                    if (shift == null ||
+                        shift < Int.MIN_VALUE.toLong() || shift > Int.MAX_VALUE.toLong()
+                    ) {
+                        invalid += "$fallbackPrefix.waiter_shift"
+                    }
+                }
+
+                "result_stack" -> {
                     val shift = value("$fallbackPrefix.waiter_shift")
                     if (shift == null ||
                         shift < Int.MIN_VALUE.toLong() || shift > Int.MAX_VALUE.toLong()
@@ -875,6 +893,7 @@ internal class AndroidProfileConfigController(
         private val RouteBranchFields = mapOf(
             "tcp_zerocopy" to listOf("compact_waiter"),
             "select_stack" to listOf("waiter_shift"),
+            "result_stack" to listOf("waiter_shift"),
             "multicast_waiter" to listOf(
                 "waiter_off", "buffer_size", "task_offset", "lock_offset",
                 "compact_waiter",

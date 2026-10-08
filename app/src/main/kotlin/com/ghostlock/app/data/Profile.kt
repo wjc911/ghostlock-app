@@ -3,6 +3,7 @@ package com.ghostlock.app.data
 import com.ghostlock.app.data.route.MulticastConfig
 import com.ghostlock.app.data.route.MulticastGeometry
 import com.ghostlock.app.data.route.RouteKind
+import com.ghostlock.app.data.route.ResultConfig
 import com.ghostlock.app.data.route.SelectConfig
 
 /** Read-only multicast waiter geometry, mirroring native `MulticastWaiterLayout`. */
@@ -44,7 +45,11 @@ internal data class Profile(
     val execution: ExecutionTuning get() = document.execution
     val compactWaiter: Boolean get() = (document.compactWaiter?.toInt() ?: 0) != 0
     val pselectWaiterShift: Int?
-        get() = (document.routeConfig as? SelectConfig)?.waiterShift
+        get() = when (val config = document.routeConfig) {
+            is SelectConfig -> config.waiterShift
+            is ResultConfig -> config.waiterShift
+            else -> null
+        }
     val mmStructSz: UInt? get() = document.mmStructSz
 
     fun supports(candidate: RouteKind): Boolean = route == candidate

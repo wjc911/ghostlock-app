@@ -31,6 +31,7 @@ CXX_SRCS := \
   core/race/threads.cpp \
   core/route/tcp_zerocopy_route.cpp \
   core/route/select_stack_route.cpp \
+  core/route/result_stack_route.cpp \
   core/route/multicast_waiter_route.cpp \
   core/memory/payload_builder.cpp \
   core/session/runtime_config.cpp \
@@ -118,6 +119,7 @@ NATIVE_HOST_TESTS := \
   route_lifecycle_test runtime_time_test \
   kernelsnitch_scan_bounds_test route_controller_test pi_race_test \
   tcp_zerocopy_route_test select_stack_route_test \
+  result_stack_route_test \
   target_constants_test native_resource_test \
   profile_binary_test futex_hash_test number_parse_test \
   runtime_paths_test handoff_probe_test victim_context_test \
@@ -202,6 +204,15 @@ $(HOST_BUILD_DIR)/address_space_test: core/tests/address_space_test.cpp core/mem
 $(HOST_BUILD_DIR)/route_status_test: core/tests/route_status_test.cpp core/route/route_status.h
 	@mkdir -p $(HOST_BUILD_DIR)
 	$(HOST_CXX) $(HOST_CXXFLAGS) -Icore $< -o $@
+
+$(HOST_BUILD_DIR)/result_stack_route_test: core/tests/result_stack_route_test.cpp \
+  core/route/result_stack_route.h core/route/result_stack_route.cpp \
+  core/support/native_resource.cpp core/support/native_resource.hpp \
+  core/support/native_result.hpp core/race/pi_race.h core/memory/payload_builder.h \
+  core/profile/model.h core/route/route_status.h
+	@mkdir -p $(HOST_BUILD_DIR)
+	$(HOST_CXX) $(HOST_CXXFLAGS) -pthread -Icore $< core/route/result_stack_route.cpp \
+	  core/support/native_resource.cpp -o $@
 
 $(HOST_BUILD_DIR)/runtime_time_test: core/tests/runtime_time_test.cpp core/support/time.h
 	@mkdir -p $(HOST_BUILD_DIR)

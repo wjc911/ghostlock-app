@@ -209,6 +209,7 @@ namespace ghostlock::binary_profile {
             {"route.tcp_zerocopy", kRouteTcp, std::size(kRouteTcp)},
             {"route.select_stack", kRouteSelect, std::size(kRouteSelect)},
             {"route.multicast_waiter", kRouteMulticast, std::size(kRouteMulticast)},
+            {"route.result_stack", kRouteSelect, std::size(kRouteSelect)},
         };
 #undef PLAIN
 #undef OPT
@@ -223,6 +224,8 @@ namespace ghostlock::binary_profile {
                     return "route.select_stack";
                 case profile::kRouteMulticastWaiter:
                     return "route.multicast_waiter";
+                case profile::kRouteResultStack:
+                    return "route.result_stack";
                 default:
                     return {};
             }
@@ -277,7 +280,8 @@ namespace ghostlock::binary_profile {
              * is rejected instead of being inferred. */
             if (out->route != profile::kRouteTcpZerocopy &&
                 out->route != profile::kRouteSelectStack &&
-                out->route != profile::kRouteMulticastWaiter) {
+                out->route != profile::kRouteMulticastWaiter &&
+                out->route != profile::kRouteResultStack) {
                 return -1;
             }
 

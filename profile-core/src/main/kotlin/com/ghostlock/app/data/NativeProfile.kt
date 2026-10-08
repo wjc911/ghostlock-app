@@ -349,6 +349,7 @@ data class NativeProfileDocument(
             fun vulOrNull(path: String): ULong? = value(path)?.toULong()
             fun vbOrNull(path: String): UByte? = value(path)?.toUByte()
             val routeConfig = RouteKind.fromToken(route)?.buildConfig(value) ?: NoRouteConfig
+            val routeExecutionPrefix = route?.let { "execution.routes.$it" }
             return NativeProfileDocument(
                 release = release,
                 routeKind = routeKind(route),
@@ -429,8 +430,12 @@ data class NativeProfileDocument(
                     handoffModulePollIntervalMs = vu("execution.handoff.module_poll_interval_ms"),
                     handoffEnforcePollAttempts = vu("execution.handoff.enforce_poll_attempts"),
                     handoffEnforcePollIntervalMs = vu("execution.handoff.enforce_poll_interval_ms"),
-                    consumerMaxCalls = vu("execution.routes.select_stack.consumer_max_calls"),
-                    consumerBurstCalls = vu("execution.routes.select_stack.consumer_burst_calls"),
+                    consumerMaxCalls = routeExecutionPrefix?.let {
+                        vu("$it.consumer_max_calls")
+                    } ?: 0u,
+                    consumerBurstCalls = routeExecutionPrefix?.let {
+                        vu("$it.consumer_burst_calls")
+                    } ?: 0u,
                 ),
                 safeMode = 0u,
                 routeConfig = routeConfig,
@@ -628,6 +633,7 @@ private fun routeSectionName(route: UInt): String = when (RouteKind.fromWire(rou
     RouteKind.TCP_ZEROCOPY -> "route.tcp_zerocopy"
     RouteKind.SELECT_STACK -> "route.select_stack"
     RouteKind.MULTICAST_WAITER -> "route.multicast_waiter"
+    RouteKind.RESULT_STACK -> "route.result_stack"
     null -> ""
 }
 

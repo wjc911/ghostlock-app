@@ -64,7 +64,8 @@ android {
         }
     }
     defaultConfig {
-        applicationId = "com.ghostlock.app"
+        applicationId = (project.findProperty("forkApplicationId") as String?)
+            ?: "com.ghostlock.app"
         minSdk = 31
         targetSdk = 37
         versionCode = gitVersionCode

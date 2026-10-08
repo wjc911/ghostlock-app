@@ -17,9 +17,11 @@ namespace {
         route::RouteStatus select_status = {.code = route::ROUTE_OK};
         route::RouteStatus tcp_status = {.code = route::ROUTE_OK};
         route::RouteStatus multicast_status = {.code = route::ROUTE_OK};
+        route::RouteStatus result_status = {.code = route::ROUTE_OK};
         int32_t select_calls = 0;
         int32_t tcp_calls = 0;
         int32_t multicast_calls = 0;
+        int32_t result_calls = 0;
     };
 
     StubState state;
@@ -55,6 +57,12 @@ namespace ghostlock::route {
         state.multicast_calls++;
         return state.multicast_status;
     }
+
+    RouteStatus do_result_stack_fake_lock_route(const memory::WriteRequest *request) {
+        assert(request);
+        state.result_calls++;
+        return state.result_status;
+    }
 } // namespace ghostlock::route
 
 int32_t main(void) {
@@ -65,6 +73,7 @@ int32_t main(void) {
     static_assert(SelectPolicy::kind == RouteKind::SelectStack);
     static_assert(TcpPolicy::kind == RouteKind::TcpZerocopy);
     static_assert(MulticastPolicy::kind == RouteKind::MulticastWaiter);
+    static_assert(ResultStackPolicy::kind == RouteKind::ResultStack);
 
     static_assert(!SelectPolicy::multicast && !SelectPolicy::w2_fast_repair &&
                   !SelectPolicy::w3_exact_target && !SelectPolicy::tcp_payload_layout &&
@@ -78,16 +87,18 @@ int32_t main(void) {
 
     /* Every policy satisfies the registry concept. */
     static_assert(RoutePolicy<SelectPolicy> && RoutePolicy<TcpPolicy> &&
-                  RoutePolicy<MulticastPolicy>);
+                  RoutePolicy<MulticastPolicy> && RoutePolicy<ResultStackPolicy>);
 
     const profile::TargetProfile select_profile = profile_with(profile::kRouteSelectStack, 0);
     const profile::TargetProfile tcp_profile = profile_with(profile::kRouteTcpZerocopy, 0);
     const profile::TargetProfile mcast_profile = profile_with(profile::kRouteMulticastWaiter, 0);
+    const profile::TargetProfile result_profile = profile_with(profile::kRouteResultStack, 0);
     const profile::TargetProfile auto_profile = profile_with(profile::kRouteAuto, 0);
 
     assert(SelectPolicy::supported(select_profile) && !SelectPolicy::supported(tcp_profile));
     assert(TcpPolicy::supported(tcp_profile) && !TcpPolicy::supported(mcast_profile));
     assert(MulticastPolicy::supported(mcast_profile) && !MulticastPolicy::supported(select_profile));
+    assert(ResultStackPolicy::supported(result_profile) && !ResultStackPolicy::supported(select_profile));
     assert(!SelectPolicy::supported(auto_profile) && !TcpPolicy::supported(auto_profile) &&
            !MulticastPolicy::supported(auto_profile));
 
@@ -95,6 +106,7 @@ int32_t main(void) {
     assert(std::holds_alternative<SelectPolicy>(make_route_policy(select_profile)));
     assert(std::holds_alternative<TcpPolicy>(make_route_policy(tcp_profile)));
     assert(std::holds_alternative<MulticastPolicy>(make_route_policy(mcast_profile)));
+    assert(std::holds_alternative<ResultStackPolicy>(make_route_policy(result_profile)));
 
     /* Capability projection follows the resolved policy. */
     assert(!route_needs_ghost_disarm(select_profile) && !route_needs_ghost_disarm(tcp_profile) &&

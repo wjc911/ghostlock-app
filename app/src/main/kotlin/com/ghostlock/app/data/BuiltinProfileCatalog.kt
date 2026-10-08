@@ -94,6 +94,7 @@ internal class BuiltinProfileCatalog(context: Context) {
     private fun routeFieldKey(route: String, field: String): String = when (route) {
         "tcp_zerocopy" if field == "compact_waiter" -> "compact_waiter"
         "select_stack" if field == "waiter_shift" -> "pselect_waiter_shift"
+        "result_stack" if field == "waiter_shift" -> "pselect_waiter_shift"
         "multicast_waiter" -> "mcast.$field"
         else -> "$route.$field"
     }

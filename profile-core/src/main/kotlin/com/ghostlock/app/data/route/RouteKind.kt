@@ -16,6 +16,9 @@ enum class RouteKind(
     MULTICAST_WAITER(3u, "multicast_waiter", MulticastConfig.EMPTY, { value ->
         MulticastConfig.from(value)
     }),
+    RESULT_STACK(4u, "result_stack", ResultConfig.EMPTY, { value ->
+        ResultConfig.from(value)
+    }),
     ;
 
     fun emptyConfig(): RouteConfig = empty

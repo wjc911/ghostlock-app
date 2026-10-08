@@ -1,6 +1,8 @@
 #ifndef GHOSTLOCK_ROUTE_API_HPP
 #define GHOSTLOCK_ROUTE_API_HPP
 
+#include <array>
+
 #include <cstdint>
 #include "support/status.hpp"
 #include <sys/select.h>
@@ -18,12 +20,14 @@ namespace ghostlock::route {
     uint64_t fdset_get_word(const fd_set *set, int32_t word);
 
     void reserve_standard_io(void);
+    const std::array<int32_t, 3> &standard_io_backup_values(void);
 
     RouteStatus do_pselect_fake_lock_route(const ghostlock::memory::WriteRequest *request);
 
     RouteStatus do_tcp_fake_lock_route(const ghostlock::memory::WriteRequest *request);
 
     RouteStatus do_kernel5_fake_lock_route(const ghostlock::memory::WriteRequest *request);
+    RouteStatus do_result_stack_fake_lock_route(const ghostlock::memory::WriteRequest *request);
 } // namespace ghostlock::route
 
 #endif

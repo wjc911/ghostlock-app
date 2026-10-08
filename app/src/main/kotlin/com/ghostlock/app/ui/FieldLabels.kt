@@ -46,6 +46,10 @@ private fun fieldLabelRes(path: String): Int? = when (path) {
     "execution.routes.select_stack.consumer_max_calls" -> R.string.field_execution_routes_select_stack_consumer_max_calls
     "execution.routes.select_stack.enter_delay_us" -> R.string.field_execution_routes_select_stack_enter_delay_us
     "execution.routes.select_stack.timeout_us" -> R.string.field_execution_routes_select_stack_timeout_us
+    "execution.routes.result_stack.consumer_burst_calls" -> R.string.field_execution_routes_select_stack_consumer_burst_calls
+    "execution.routes.result_stack.consumer_max_calls" -> R.string.field_execution_routes_select_stack_consumer_max_calls
+    "execution.routes.result_stack.enter_delay_us" -> R.string.field_execution_routes_select_stack_enter_delay_us
+    "execution.routes.result_stack.timeout_us" -> R.string.field_execution_routes_select_stack_timeout_us
     "execution.routes.tcp_zerocopy.arm_sequence" -> R.string.field_execution_routes_tcp_zerocopy_arm_sequence
     "execution.routes.tcp_zerocopy.attempts" -> R.string.field_execution_routes_tcp_zerocopy_attempts
     "execution.routes.tcp_zerocopy.post_receive_hold_iterations" -> R.string.field_execution_routes_tcp_zerocopy_post_receive_hold_iterations
@@ -83,7 +87,9 @@ private fun fieldLabelRes(path: String): Int? = when (path) {
     "offset.slide_loggers_0_1" -> R.string.field_off_slide_loggers_0_1
     "offset.slide_nfulnl_logger" -> R.string.field_off_slide_nfulnl_logger
     "route.select_stack.waiter_shift" -> R.string.field_pselect_waiter_shift
+    "route.result_stack.waiter_shift" -> R.string.field_pselect_waiter_shift
     "fallback.route.select_stack.waiter_shift" -> R.string.field_pselect_waiter_shift
+    "fallback.route.result_stack.waiter_shift" -> R.string.field_pselect_waiter_shift
     "task_struct.atomic_flags" -> R.string.field_task_atomic_flags
     "task_struct.comm" -> R.string.field_task_comm
     "task_struct.cred" -> R.string.field_task_cred

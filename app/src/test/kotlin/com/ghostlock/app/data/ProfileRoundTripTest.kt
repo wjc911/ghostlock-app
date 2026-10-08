@@ -43,6 +43,11 @@ class ProfileRoundTripTest {
         "mcast.task_offset" to 0x40L,
         "mcast.lock_offset" to 0x50L,
     )
+    private val resultValues = common + mapOf(
+        "pselect_waiter_shift" to 14L,
+        "execution.routes.result_stack.consumer_max_calls" to 1L,
+        "execution.routes.result_stack.consumer_burst_calls" to 1L,
+    )
 
     private fun document(
         route: String?,
@@ -68,6 +73,7 @@ class ProfileRoundTripTest {
             "tcp_zerocopy" to tcpValues,
             "select_stack" to selectValues,
             "multicast_waiter" to multicastValues,
+            "result_stack" to resultValues,
         )) {
             val original = document(route, "select_stack", vals)
             val decoded = NativeProfileDocument.fromBinary(original.toBinary())
