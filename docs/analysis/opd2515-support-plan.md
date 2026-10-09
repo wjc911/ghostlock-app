@@ -370,3 +370,26 @@ root，未形成分区持久化，也没有复现 UBSAN 重启。
 先通过 USB/无线 ADB 启动 Shizuku server；server 就绪后，GhostLock 内是一键
 执行。锁定 bootloader 下的普通 APK 不能自行创建 UID 2000 的 shell 进程，因而
 不能承诺“完全不经过 ADB 的重启后一键”。
+
+### 批次 H：鲁棒性和单次尝试保护（2026-10-09）
+
+随后使用相同 APK 做压力复测时，日志达到 native root 入口后设备重启，
+`ro.boot.bootreason` 为
+`kernel_panic,ubsan:_array_index_out_of_bnulls:_fatal_exception`。没有出现
+OPPO anti-root 的重启字符串。这使批次 G 的证据强度降为“一次成功运行”；
+当前 route 在重复运行下也失败，不能称为稳定。
+
+APK 现在在启动 standalone preloader 前 fail-closed：
+
+- `bootreason` 包含 `kernel_panic` 或
+  `malicious_app_try_to_root_devices` 时拒绝启动；
+- 在 `/data/local/tmp/ghostlock-app/.opd2515-boot-id` 写入当前
+  `/proc/sys/kernel/random/boot_id`，同一开机 ID 不允许第二次尝试；
+- 先探测已有的临时 `su`，已是 uid 0 时报告现有 root 并拒绝再次执行，
+  不可用的文件标记为 stale；
+- Shizuku runner 对此 preloader 只允许一次 UserService 连接，普通 route
+  仍保留原有重连次数。
+
+这些改动保持历史 preloader 字节和临时 root 模型不变，只增加安全边界和
+可诊断性；它们不是新的 exploit，也不能让锁定 bootloader 的平板在重启后
+自动获得 root。重启后仍需要先让 Shizuku server 以 shell UID 运行。

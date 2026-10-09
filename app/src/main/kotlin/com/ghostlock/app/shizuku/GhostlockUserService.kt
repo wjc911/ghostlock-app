@@ -18,6 +18,8 @@ class GhostlockUserService(private val context: Context) : IGhostlockUserService
         const val StatusMarker = "\u001eGLK_STATUS"
         const val StatusAck = "\u001eGLK_STATUS_ACK\n"
         const val StatusDisabled = "\u001eGLK_STATUS_DISABLED"
+        const val Opd2515WorkDir = "/data/local/tmp/ghostlock-app"
+        const val Opd2515BootMarkerName = ".opd2515-boot-id"
     }
 
     override fun runExploit(
@@ -171,9 +173,55 @@ class GhostlockUserService(private val context: Context) : IGhostlockUserService
                     "libopd2515_preload.so",
                 )
                 require(source.isFile) { "missing OPD2515 preloader: ${source.absolutePath}" }
-                val workDir = File("/data/local/tmp/ghostlock-app").apply {
+                val workDir = File(Opd2515WorkDir).apply {
                     require(isDirectory || mkdirs()) { "cannot create $absolutePath" }
                 }
+                val bootId = File("/proc/sys/kernel/random/boot_id").readText().trim()
+                require(bootId.isNotEmpty()) { "kernel boot_id is unavailable; refusing preloader" }
+                val bootReason = readCommandOutput("/system/bin/getprop", "ro.boot.bootreason")
+                callback.onLog(
+                    "<s> OPD2515 preflight: bootId=$bootId " +
+                        "bootreason=${bootReason.ifEmpty { "unknown" }}",
+                )
+                require(!isUnsafeBootReason(bootReason)) {
+                    "unsafe bootreason=$bootReason; reboot cleanly before retrying OPD2515"
+                }
+
+                val bootMarker = File(workDir, Opd2515BootMarkerName)
+                val previousBootId = if (bootMarker.isFile) {
+                    bootMarker.readText().trim()
+                } else {
+                    ""
+                }
+                require(previousBootId != bootId) {
+                    "OPD2515 preloader already attempted in this boot; reboot before retrying"
+                }
+
+                val existingSu = File("/data/local/tmp/su")
+                if (existingSu.isFile) {
+                    val probe = runRootCommand(existingSu, "id")
+                    val activeRoot = probe.code == 0 &&
+                        Regex("(^|\\s)uid=0(?:\\(|\\s|$)").containsMatchIn(probe.output)
+                    if (activeRoot) {
+                        callback.onLog(
+                            "<b> OPD2515 preflight: temporary root is already active; " +
+                                "refusing a second exploit attempt",
+                        )
+                        return@runCatching 0
+                    }
+                    callback.onLog(
+                        "<s> OPD2515 preflight: stale su exists but is not usable " +
+                            "(exit=${probe.code})",
+                    )
+                }
+
+                // Write the marker before starting the native process. A panic
+                // or force-stop must not turn a second tap into a same-boot
+                // retry of the high-risk standalone payload.
+                bootMarker.writeText("$bootId\n")
+                callback.onLog(
+                    "<s> OPD2515 preflight: attempt marker written to ${bootMarker.absolutePath}",
+                )
                 val staged = File(workDir, "libopd2515_preload.so")
                 source.copyTo(staged, overwrite = true)
                 staged.setReadable(true, false)
@@ -243,6 +291,21 @@ class GhostlockUserService(private val context: Context) : IGhostlockUserService
             (byte.toInt() and 0xff).toString(16).padStart(2, '0')
         }
     }
+
+    private fun readCommandOutput(vararg command: String): String {
+        val process = ProcessBuilder(*command)
+            .redirectErrorStream(true)
+            .start()
+        if (!process.waitFor(2, TimeUnit.SECONDS)) {
+            process.destroyForcibly()
+            return ""
+        }
+        return process.inputStream.bufferedReader().use { it.readText().trim() }
+    }
+
+    private fun isUnsafeBootReason(reason: String): Boolean =
+        reason.contains("kernel_panic", ignoreCase = true) ||
+            reason.contains("malicious_app_try_to_root_devices", ignoreCase = true)
 
     /**
      * Complete the volatile handoff after the preloader process exits.  The

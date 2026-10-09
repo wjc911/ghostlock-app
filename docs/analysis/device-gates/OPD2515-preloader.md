@@ -85,6 +85,32 @@ volatile and disappears on reboot.** Starting the Shizuku server still requires
 the ADB shell/USB-debugging step after each reboot because a normal application
 cannot create a UID-2000 shell process by itself on a locked bootloader.
 
+## 2026-10-09 — Batch H repeat pressure attempt
+
+Status: **FAIL — kernel UBSAN reboot before root handoff**. The same historical
+standalone APK and the same Shizuku shell-UID entry were run again as a pressure
+test. The native log reached `slide-kaslr-ok` and `direct_root_enter`, then the
+device disappeared and rebooted. After reconnect, the bootreason was
+`kernel_panic,ubsan:_array_index_out_of_bnulls:_fatal_exception`, shell remained
+UID 2000, and `/data/local/tmp/su -c id` returned `Permission denied`.
+
+This is a second failure signal for the route, not evidence of an OPPO anti-root
+reboot: the anti-root reboot string was absent and the reboot reason identified
+the kernel UBSAN path. The one earlier Batch G success therefore remains a
+single-run observation and does not establish stability.
+
+The APK hardening batch adds three fail-closed controls before the native launch:
+
+1. Reject `kernel_panic` and `malicious_app_try_to_root_devices` boot reasons.
+2. Write `/data/local/tmp/ghostlock-app/.opd2515-boot-id` before starting the
+   preloader, and refuse a second attempt with the same kernel boot ID.
+3. Probe an existing `/data/local/tmp/su`; report an already-active temporary
+   root without launching another exploit, and label an unusable file as stale.
+
+The Shizuku runner also uses one connection attempt for this preloader instead
+of its normal three-attempt reconnect loop. These controls reduce repeat-trigger
+risk; they do not change the native payload or make the exploit stable.
+
 ## Run record template
 
 ```text
