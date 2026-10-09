@@ -133,8 +133,12 @@ jobs:
           fi
           ./gradlew :app:assembleRelease -PforkApplicationId=com.ghostlock.opd2515.legacy --no-daemon
 
-          test "$(stat -c%s tools/opd2515_preload/build/bin/preload.so)" = "91720"
-          "${OPD2515_NDK_ROOT}/toolchains/llvm/prebuilt/linux-x86_64/bin/clang" --version | grep -F "clang version 18.0.1"
+          preload_size="$(stat -c%s tools/opd2515_preload/build/bin/preload.so)"
+          echo "OPD2515 standalone preloader size=${preload_size}"
+          test "${preload_size}" = "91720"
+          clang_version="$(${OPD2515_NDK_ROOT}/toolchains/llvm/prebuilt/linux-x86_64/bin/clang --version)"
+          echo "${clang_version}"
+          echo "${clang_version}" | grep -F "clang version 18.0.1"
 
       - name: Strip Ghostlock binary
         run: |
