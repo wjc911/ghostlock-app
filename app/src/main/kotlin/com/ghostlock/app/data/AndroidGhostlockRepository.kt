@@ -44,9 +44,16 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
         const val UserProfilesDirectoryName = "user_profiles"
         const val EditSessionPreferences = "ghostlock_edit_session"
         const val ExtractBinaryName = "libextract.so"
-        const val Opd2515PreloadBinaryName = "libopd2515_preload.so"
         const val Opd2515Release =
             "6.12.58-android16-6-g7704a1ae279b-ab15213644-4k"
+        /*
+         * The shell-UID preloader is integrated, but the exact-device gate is
+         * deliberately closed until a clean run proves uid=0 and 30-second
+         * stability. The 2026-10-09 run ended in a kernel UBSAN reboot;
+         * exposing that route as supported would make the failure repeatable.
+         * Flip only together with the device-gate record and a new APK build.
+         */
+        const val Opd2515PreloaderValidated = false
         const val DefaultDebugLocation = "Download/ghostlock-debug-log"
         const val PrefForceAttackTest = "force_attack_test"
         const val PrefDebugExportEnabled = "debug_export_enabled"
@@ -397,6 +404,14 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
 
     override suspend fun runExploit(pair: CpuPair, onLog: (String) -> Unit): Int =
         withDebugAttackLog("direct", onLog) { archivedLog, debugDir, writeSidecar ->
+            val release = System.getProperty("os.version", "").orEmpty()
+            if (isOpd2515Target(release)) {
+                archivedLog(
+                    "<s> error: direct app-UID route is disabled for exact OPD2515; " +
+                        "enable Shizuku to run the shell-UID preloader",
+                )
+                return@withDebugAttackLog 2
+            }
             runExploitBinary(pair, "libghostlock.so", archivedLog, debugDir, writeSidecar)
         }
 
@@ -404,6 +419,27 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
         return withDebugAttackLog("shizuku", onLog) { archivedLog, debugDir, writeSidecar ->
             archivedLog("<s> resolving profile")
             val release = System.getProperty("os.version", "").orEmpty()
+            if (isOpd2515Target(release)) {
+                if (!Opd2515PreloaderValidated) {
+                    archivedLog(
+                        "<s> error: exact OPD2515 preloader is disabled after " +
+                            "the kernel-UBSAN reboot; no retry is permitted until " +
+                            "the device gate is PASS",
+                    )
+                    return@withDebugAttackLog 3
+                }
+                archivedLog("<b> exact OPD2515: selecting shell-UID preloader via Shizuku")
+                resetRunState()
+                return@withDebugAttackLog shizukuRunner.run(
+                    pair = pair,
+                    safeMode = safeModeEnabled,
+                    forceAttack = forceAttackTest,
+                    profileBlob = ByteArray(0),
+                    debugDir = debugDir,
+                    onLog = archivedLog,
+                    opd2515Preloader = true,
+                )
+            }
             val config = profileController.load(release, pair)
             val profileBlob = profileController.nativeDocument(config)
             archivedLog(
@@ -436,10 +472,16 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
                     archivedLog("<b> starting UserService")
                     resetRunState()
                     shizukuRunner.run(
-                        pair, safeModeEnabled, forceAttackTest, profileBlob, debugDir, archivedLog,
-                    ) { step, status ->
-                        if (status == "disabled") clearRunState() else applyRunStatus(step, status)
-                    }
+                        pair = pair,
+                        safeMode = safeModeEnabled,
+                        forceAttack = forceAttackTest,
+                        profileBlob = profileBlob,
+                        debugDir = debugDir,
+                        onLog = archivedLog,
+                        onStatus = { step, status ->
+                            if (status == "disabled") clearRunState() else applyRunStatus(step, status)
+                        },
+                    )
                 }
             }
         }
@@ -612,14 +654,6 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
             if (safeModeEnabled) {
                 profileBlob = NativeProfileDocument.patchSafeMode(profileBlob) ?: profileBlob
             }
-            if (shouldUseOpd2515Preloader(release, config)) {
-                onLog("<b> OPD2515 exact preloader selected")
-                dumpRuntimeProfile(onLog, writeSidecar, release, pair, profileBlob)
-                resetRunState()
-                val preloaderCode = runOpd2515Preloader(onLog)
-                if (preloaderCode == 0) clearRunState()
-                return preloaderCode
-            }
             dumpRuntimeProfile(onLog, writeSidecar, release, pair, profileBlob)
             val ksuOffset = AtomicLong()
             val nativeOffset = AtomicLong()
@@ -695,69 +729,9 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
         }
     }
 
-    /**
-     * The Pad Mini's exact kernel has a separately built result-set preloader.
-     * Keep the selection tied to the resolved profile and release so imported
-     * offsets or another device can never silently run this target-specific
-     * payload.
-     */
-    private fun shouldUseOpd2515Preloader(release: String, config: ProfileConfig): Boolean {
-        if (release != Opd2515Release || config.route != "result_stack") return false
-        val model = Build.MODEL.trim()
-        if (model != "OPD2515") return false
-        return File(
-            appContext.applicationInfo.nativeLibraryDir,
-            Opd2515PreloadBinaryName,
-        ).isFile
-    }
-
-    /** Runs the exact OPD2515 temporary-root preloader from the app UID. */
-    private suspend fun runOpd2515Preloader(onLog: (String) -> Unit): Int {
-        val binary = File(
-            appContext.applicationInfo.nativeLibraryDir,
-            Opd2515PreloadBinaryName,
-        )
-        require(binary.isFile) { "missing OPD2515 preloader: ${binary.absolutePath}" }
-        val rootSeen = AtomicReference(false)
-        val command = ProcessBuilder("/system/bin/id")
-            .directory(filesDir)
-            .redirectErrorStream(true)
-            .apply {
-                environment()["LD_PRELOAD"] = binary.absolutePath
-                environment()["GHOSTLOCK_HOME"] = filesDir.absolutePath
-                environment()["TMPDIR"] = filesDir.absolutePath
-                environment()["HOME"] = filesDir.absolutePath
-                environment()["GHOSTLOCK_CLIENT_UID"] = android.os.Process.myUid().toString()
-            }
-        onLog("<b> starting OPD2515 preloader: ${binary.absolutePath}")
-        val code = runProcess(
-            command,
-            onLog = { line ->
-                if (line.contains("direct-root-summary root=1")) rootSeen.set(true)
-                onLog("[opd2515] $line")
-            },
-            timeoutSeconds = 120,
-            captureOutput = true,
-        )
-        val probeSeen = AtomicReference(false)
-        val probeCode = if (code == 0 && rootSeen.get()) {
-            runProcess(
-                ProcessBuilder("/data/local/tmp/su", "-c", "id")
-                    .directory(filesDir)
-                    .redirectErrorStream(true),
-                onLog = { line ->
-                    if (line.contains("uid=0(root)")) probeSeen.set(true)
-                    onLog("[opd2515-su] $line")
-                },
-                timeoutSeconds = 10,
-            )
-        } else {
-            -1
-        }
-        val success = code == 0 && rootSeen.get() && probeCode == 0 && probeSeen.get()
-        onLog("<b> OPD2515 preloader exited code=$code su_probe=$probeCode root=$success")
-        return if (success) 0 else 1
-    }
+    /** Exact target gate shared by the preloader selector and Shizuku guard. */
+    private fun isOpd2515Target(release: String): Boolean =
+        release == Opd2515Release && Build.MODEL.trim() == "OPD2515"
 
     override suspend fun readDocument(uri: String): String =
         appContext.contentResolver.openInputStream(uri.toUri())?.bufferedReader()?.use { it.readText() } ?: throw IOException("cannot open $uri")
@@ -991,6 +965,7 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
 
     private fun isKernelSupported(): Boolean {
         val version = System.getProperty("os.version", "").orEmpty()
+        if (isOpd2515Target(version) && !Opd2515PreloaderValidated) return false
         return version in builtinProfiles.unames || importedOffsetsMatch(version)
     }
 
