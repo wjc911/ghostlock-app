@@ -83,11 +83,32 @@ root 与 `su` daemon 本身是易失状态，重启后消失。源码回滚只�
 - 不使用 X9U 的预编译 payload；每个设备仍必须从自己的 boot/xbl 重新生成；
 - 不执行分区写入、GBL chainload 或 bootloader 解锁。
 
+## 同内核证据与实现差异
+
+`koaaN/x9u-gbl-chainload-app` 的 `RootOps` 是目前最直接的 App-UID 证据：普通
+Activity 用 `ProcessBuilder` 启动 `/system/bin/sh`，设置 `LD_PRELOAD` 指向 APK 的
+native library，并通过 app-private broker 与 root daemon 通信；它不要求 ADB 或
+Shizuku。其 X9U `target.h` 与 OPD2515 从本机 boot/xbl 重新生成的 `target.h` 字节
+一致，包含 `PSELECT_WAITER_WORD_SHIFT=14` 和相同的关键内核地址。
+
+其他 SM8850/8E5 项目大多仍把完整链放在 ADB shell 中，或只提供 seccomp 受限的
+bootstrap/mini-adb 第二阶段；它们证明的是漏洞跨设备可移植性，不是 OPD2515 的
+无 ADB 入口。`JoinChang/ghostlock-oneplus` 还把 X9 Ultra 列为其旧实现的
+“not feasible”，因此本分支只把 X9U 的 App-UID 启动方式和 OPD2515 自己的
+preloader 结合，保持实验开关，不能把公开项目的互相矛盾直接当作平板验证。
+
+实验分支的 Java 侧以 native 输出中的
+`direct-root-summary root=1 ... su=1/...` 作为主要交接证据；`/data/local/tmp/su`
+的 Java 进程执行和 anti-root 停止动作均为 best-effort，native payload 本身已在
+获得 root 后停止 `ExSystemService`。这样不会因为 untrusted_app 的 SELinux
+`execute`/`connectto` 限制，把已经成功的临时 root 报成失败。
+
 ## 进度
 
 - [x] 从平板 boot/xbl 重新生成 target header
 - [x] 用 NDK r27 重建 exact OPD preloader，hash 固定
 - [x] 增加 opt-in App-UID Android 入口与 per-boot fail-closed guard
-- [ ] 本地/CI 编译实验 APK
+- [x] CI 编译实验 APK（`37960284218`，preloader hash 验收通过）
+- [x] 实验分支额外上传保持 APK 容器完整的安装包
 - [ ] 平板冷启动真机门禁
 - [ ] 重启后再次激活门禁

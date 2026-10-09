@@ -683,18 +683,37 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
                 124
             }
             val nativeBytes = runCatching { nativeLog.readBytes() }.getOrDefault(ByteArray(0))
+            val nativeText = String(nativeBytes, StandardCharsets.UTF_8)
             if (nativeBytes.isNotEmpty()) {
                 writeSidecar("opd2515-direct-preloader.log", nativeBytes)
-                String(nativeBytes, StandardCharsets.UTF_8)
+                nativeText
                     .lineSequence()
                     .filter { it.isNotBlank() }
                     .forEach(onLog)
             }
             onLog("<b> OPD2515 direct preloader exited code=$code")
-            if (code != 0) return@withContext code
+            /* The /system/bin/id process itself normally exits 0 even when a
+             * constructor payload failed.  Conversely, an SELinux denial can
+             * prevent the app process from executing /data/local/tmp/su even
+             * after the native payload has installed a working daemon.  Use
+             * the native root summary as the primary handoff proof and keep
+             * the Java postflight best-effort. */
+            val nativeRootReady = nativeText.contains("direct-root-summary root=1") &&
+                nativeText.contains("su=1/")
+            if (!nativeRootReady) {
+                return@withContext if (code == 0) 1 else code
+            }
 
             val postflight = runOpd2515DirectPostflight(onLog)
-            if (postflight) 0 else 1
+            if (postflight) {
+                0
+            } else {
+                onLog(
+                    "<s> OPD2515 direct: native root handoff is ready; " +
+                        "Java-side su postflight was unavailable",
+                )
+                0
+            }
         } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {
