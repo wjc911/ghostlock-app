@@ -89,6 +89,16 @@ jobs:
       - name: Link ONDK Rust toolchain
         run: rustup toolchain link ondk "${{ runner.temp }}/ondk/toolchains/rust"
 
+      - name: Prepare fork signing key
+        if: github.ref != 'refs/heads/main'
+        run: |
+          keytool -genkeypair -v \
+            -keystore "${{ runner.temp }}/ghostlock-fork.keystore" \
+            -storepass android -keypass android \
+            -alias ghostlock-fork \
+            -dname "CN=GhostLock fork, O=local" \
+            -validity 10000 -keyalg RSA -keysize 2048
+
       - name: Decode Android signing key
         if: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
         run: echo ${{ secrets.SIGNING_KEY }} | base64 -d > keystore.jks
@@ -110,11 +120,21 @@ jobs:
           export ANDROID_NDK_HOME="$ONDK_HOME"
           export NDK_ROOT="$ONDK_HOME"
           export OPD2515_NDK_ROOT="${{ runner.temp }}/opd2515-ndk/android-ndk-r27"
-          export KEYSTORE_PATH="../keystore.jks"
-          export KEYSTORE_PASS="${{ secrets.KEY_STORE_PASSWORD }}"
-          export KEY_ALIAS="${{ secrets.ALIAS }}"
-          export KEY_PASSWORD="${{ secrets.KEY_PASSWORD }}"
+          if [ -f "../keystore.jks" ]; then
+            export KEYSTORE_PATH="../keystore.jks"
+            export KEYSTORE_PASS="${{ secrets.KEY_STORE_PASSWORD }}"
+            export KEY_ALIAS="${{ secrets.ALIAS }}"
+            export KEY_PASSWORD="${{ secrets.KEY_PASSWORD }}"
+          else
+            export KEYSTORE_PATH="${{ runner.temp }}/ghostlock-fork.keystore"
+            export KEYSTORE_PASS="android"
+            export KEY_ALIAS="ghostlock-fork"
+            export KEY_PASSWORD="android"
+          fi
           ./gradlew :app:assembleRelease -PforkApplicationId=com.ghostlock.opd2515.legacy --no-daemon
+
+          test "$(stat -c%s tools/opd2515_preload/build/bin/preload.so)" = "91720"
+          strings tools/opd2515_preload/build/bin/preload.so | grep -F "clang version 18.0.1"
 
       - name: Strip Ghostlock binary
         run: |
