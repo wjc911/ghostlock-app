@@ -15,6 +15,15 @@ layout.buildDirectory.set(rootProject.layout.buildDirectory.dir("app"))
 
 val appName = "GhostLock"
 val appVersionName = "1.2"
+/*
+ * The exact OPD2515 App-UID route is an experiment, not part of the normal
+ * release.  Keeping it behind an explicit build property lets the ordinary
+ * fork remain fail-closed while CI can produce a separately identifiable APK
+ * for one controlled device validation.
+ */
+val opd2515DirectExperimental =
+    (project.findProperty("opd2515DirectExperimental") as String?)
+        ?.toBooleanStrictOrNull() ?: false
 
 val gitVersionCode = runCatching {
     providers.exec {
@@ -107,9 +116,19 @@ android {
             vcsInfo.include = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = signingConfigs.getByName(if (keystoreFile != null) "release" else "debug")
+            buildConfigField(
+                "boolean",
+                "OPD2515_DIRECT_EXPERIMENTAL",
+                opd2515DirectExperimental.toString(),
+            )
         }
         debug {
             signingConfig = signingConfigs.getByName(if (keystoreFile != null) "release" else "debug")
+            buildConfigField(
+                "boolean",
+                "OPD2515_DIRECT_EXPERIMENTAL",
+                opd2515DirectExperimental.toString(),
+            )
         }
     }
     buildFeatures {

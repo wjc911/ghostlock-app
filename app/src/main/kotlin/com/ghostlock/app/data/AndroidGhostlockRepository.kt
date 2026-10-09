@@ -30,7 +30,9 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
 import java.io.RandomAccessFile
+import java.nio.file.Files
 import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
@@ -46,6 +48,14 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
         const val ExtractBinaryName = "libextract.so"
         const val Opd2515Release =
             "6.12.58-android16-6-g7704a1ae279b-ab15213644-4k"
+        const val Opd2515PreloaderHash =
+            "CCB15ABD51BB1B1122FF8E916CBE9DB89D3DC6BB162E8111335ED7B02B8FD4EE"
+        const val Opd2515Model = "OPD2515"
+        const val Opd2515PreloaderTimeoutMs = 30_000L
+        /* This is deliberately a build-time opt-in.  The normal fork remains
+         * fail-closed until the exact device route has a fresh cold-boot
+         * validation record. */
+        val Opd2515DirectExperimental = BuildConfig.OPD2515_DIRECT_EXPERIMENTAL
         /*
          * The exact-device preloader once reached uid=0, but a repeat run on
          * the same OPD2515 reached the kernel UBSAN path and rebooted before
@@ -161,16 +171,18 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
 
     override suspend fun snapshot(): KernelSnapshot {
         val release = System.getProperty("os.version", "unknown").orEmpty()
-        val exactOpd2515Blocked = isOpd2515Target(release) && !Opd2515PreloaderValidated
+        val exactOpd2515 = isOpd2515Target(release)
+        val exactOpd2515Blocked = exactOpd2515 &&
+            !Opd2515PreloaderValidated && !Opd2515DirectExperimental
         /* PROFILE-SUGGEST-01: recommend_shizuku is a suggestion. It seeds the
          * toggle until the user makes an explicit choice, which then overrides
          * it in both directions. */
-        val recommendShizuku = !exactOpd2515Blocked &&
+        val recommendShizuku = !exactOpd2515Blocked && !exactOpd2515 &&
             (release in builtinProfiles.recommendShizuku || importedOffsetsRecommendShizuku(release))
         // Do not let a stale preference make a fail-closed exact target look
         // runnable or request a fresh Shizuku grant. The preference itself is
         // retained so a future, separately validated profile can opt in again.
-        val shizukuActive = if (exactOpd2515Blocked) {
+        val shizukuActive = if (exactOpd2515Blocked || exactOpd2515) {
             false
         } else if (shizukuPreferenceSet) {
             shizukuEnabled
@@ -417,6 +429,13 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
         withDebugAttackLog("direct", onLog) { archivedLog, debugDir, writeSidecar ->
             val release = System.getProperty("os.version", "").orEmpty()
             if (isOpd2515Target(release)) {
+                if (Opd2515DirectExperimental) {
+                    return@withDebugAttackLog runOpd2515DirectPreloader(
+                        archivedLog,
+                        debugDir,
+                        writeSidecar,
+                    )
+                }
                 archivedLog(
                     "<s> error: direct app-UID route is disabled for exact OPD2515; " +
                         "enable Shizuku to run the shell-UID preloader",
@@ -431,6 +450,14 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
             archivedLog("<s> resolving profile")
             val release = System.getProperty("os.version", "").orEmpty()
             if (isOpd2515Target(release)) {
+                if (Opd2515DirectExperimental) {
+                    archivedLog("<s> exact OPD2515 experimental build: forcing App-UID preload")
+                    return@withDebugAttackLog runOpd2515DirectPreloader(
+                        archivedLog,
+                        debugDir,
+                        writeSidecar,
+                    )
+                }
                 if (!Opd2515PreloaderValidated) {
                     archivedLog(
                         "<s> error: exact OPD2515 preloader is disabled after " +
@@ -549,6 +576,190 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
             }
         }
         return true
+    }
+
+    /**
+     * Experimental OPD2515 App-UID entry point.
+     *
+     * The X9U reference app launches a normal system binary from an ordinary
+     * application process with the exact, device-generated preload library in
+     * LD_PRELOAD.  This method mirrors that narrow handoff without Shizuku or
+     * ADB.  It is compiled into a separately opt-in APK only; the normal fork
+     * never reaches it.  All state is volatile except for the private
+     * per-boot guard and diagnostic log in the app's own data directory.
+     */
+    private suspend fun runOpd2515DirectPreloader(
+        onLog: (String) -> Unit,
+        debugDir: String?,
+        writeSidecar: (String, ByteArray) -> Boolean,
+    ): Int = withContext(Dispatchers.IO) {
+        try {
+            require(Build.MODEL.trim() == Opd2515Model) {
+                "OPD2515 direct model gate failed: ${Build.MODEL}"
+            }
+            val release = System.getProperty("os.version", "").trim()
+            require(release == Opd2515Release) {
+                "OPD2515 direct kernel gate failed: $release"
+            }
+            val source = File(
+                appContext.applicationInfo.nativeLibraryDir,
+                "libopd2515_preload.so",
+            )
+            require(source.isFile) { "missing OPD2515 preloader: ${source.absolutePath}" }
+            val sourceHash = sha256(source).uppercase(Locale.ROOT)
+            require(sourceHash == Opd2515PreloaderHash) {
+                "unrecognized OPD2515 preloader SHA-256: $sourceHash"
+            }
+
+            val bootId = File("/proc/sys/kernel/random/boot_id").readText().trim()
+            require(bootId.isNotEmpty()) { "kernel boot_id is unavailable" }
+            val bootReason = readCommandOutput("/system/bin/getprop", "ro.boot.bootreason")
+            onLog(
+                "<s> OPD2515 direct preflight: uid=${android.os.Process.myUid()} " +
+                    "bootId=$bootId bootreason=${bootReason.ifEmpty { "unknown" }} " +
+                    "preloaderSha256=$sourceHash debugDir=${debugDir ?: "none"}",
+            )
+            require(!isUnsafeBootReason(bootReason)) {
+                "unsafe bootreason=$bootReason; reboot cleanly before retrying OPD2515"
+            }
+
+            val marker = File(filesDir, ".opd2515-direct-boot-id")
+            require(!Files.isSymbolicLink(marker.toPath())) {
+                "OPD2515 direct boot marker is a symbolic link"
+            }
+            require(!marker.exists() || marker.isFile) {
+                "OPD2515 direct boot marker is not a regular file"
+            }
+            require(!marker.isFile || marker.readText().trim() != bootId) {
+                "OPD2515 direct preloader already attempted in this boot; reboot before retrying"
+            }
+
+            val existingSu = File("/data/local/tmp/su")
+            require(!Files.isSymbolicLink(existingSu.toPath())) {
+                "temporary su is a symbolic link"
+            }
+            if (existingSu.isFile) {
+                val probe = runOpd2515RootCommand(existingSu, "id")
+                if (probe.code == 0 && Regex("(^|\\s)uid=0(?:\\(|\\s|$)").containsMatchIn(probe.output)) {
+                    onLog("<b> OPD2515 direct preflight: temporary root is already active")
+                    return@withContext 0
+                }
+                onLog("<s> OPD2515 direct preflight: stale su is not usable (exit=${probe.code})")
+            }
+
+            // Record the attempt before launching the kernel payload.  A
+            // force-stop or a panic must never turn a second tap into a same-
+            // boot retry.
+            marker.writeText("$bootId\n")
+            onLog("<s> OPD2515 direct preflight: attempt marker written")
+
+            val nativeLog = File(filesDir, ".ghostlock-opd2515-direct-$bootId.log")
+            if (nativeLog.exists()) require(nativeLog.delete()) { "cannot remove stale direct log" }
+            val command = ProcessBuilder("/system/bin/id")
+                .directory(filesDir)
+                .redirectErrorStream(true)
+                .redirectOutput(nativeLog)
+                .apply {
+                    environment()["LD_PRELOAD"] = source.absolutePath
+                    environment()["GHOSTLOCK_HOME"] = filesDir.absolutePath
+                    environment()["TMPDIR"] = filesDir.absolutePath
+                    environment()["HOME"] = filesDir.absolutePath
+                    environment()["GHOSTLOCK_CLIENT_UID"] =
+                        android.os.Process.myUid().toString()
+                }
+            onLog("<b> OPD2515 direct: starting App-UID preload")
+            val process = command.start()
+            val finished = process.waitFor(Opd2515PreloaderTimeoutMs, TimeUnit.MILLISECONDS)
+            val code = if (finished) {
+                process.exitValue()
+            } else {
+                onLog("<s> OPD2515 direct preloader timed out after 30s; terminating it")
+                process.destroyForcibly()
+                process.waitFor(1, TimeUnit.SECONDS)
+                124
+            }
+            val nativeBytes = runCatching { nativeLog.readBytes() }.getOrDefault(ByteArray(0))
+            if (nativeBytes.isNotEmpty()) {
+                writeSidecar("opd2515-direct-preloader.log", nativeBytes)
+                nativeBytes.toString(StandardCharsets.UTF_8)
+                    .lineSequence()
+                    .filter { it.isNotBlank() }
+                    .forEach(onLog)
+            }
+            onLog("<b> OPD2515 direct preloader exited code=$code")
+            if (code != 0) return@withContext code
+
+            val postflight = runOpd2515DirectPostflight(onLog)
+            if (postflight) 0 else 1
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            onLog("<-> OPD2515 direct error: ${error::class.simpleName}: ${error.message}")
+            1
+        }
+    }
+
+    private fun readCommandOutput(vararg command: String): String {
+        val process = ProcessBuilder(*command).redirectErrorStream(true).start()
+        if (!process.waitFor(2, TimeUnit.SECONDS)) {
+            process.destroyForcibly()
+            return ""
+        }
+        return process.inputStream.bufferedReader().use { it.readText().trim() }
+    }
+
+    private fun isUnsafeBootReason(reason: String): Boolean =
+        reason.contains("kernel_panic", ignoreCase = true) ||
+            reason.contains("malicious_app_try_to_root_devices", ignoreCase = true)
+
+    private fun sha256(file: File): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        file.inputStream().use { input ->
+            val buffer = ByteArray(16 * 1024)
+            while (true) {
+                val count = input.read(buffer)
+                if (count < 0) break
+                digest.update(buffer, 0, count)
+            }
+        }
+        return digest.digest().joinToString("") { byte ->
+            (byte.toInt() and 0xff).toString(16).padStart(2, '0')
+        }
+    }
+
+    private fun runOpd2515DirectPostflight(onLog: (String) -> Unit): Boolean {
+        val su = File("/data/local/tmp/su")
+        if (Files.isSymbolicLink(su.toPath()) || !su.isFile) {
+            onLog("<s> OPD2515 direct postflight: temporary su is missing or a symlink")
+            return false
+        }
+        val stopCommand =
+            "for name in exsystemservice com.oplus.exsystemservice oplus_kevent; " +
+                "do for pid in \$(pidof \$name 2>/dev/null); do kill -STOP \$pid; " +
+                "done; done"
+        val stop = runOpd2515RootCommand(su, stopCommand)
+        onLog("<s> OPD2515 direct postflight anti-root scan exit=${stop.code}")
+        if (stop.output.isNotBlank()) onLog("<s> root postflight output: ${stop.output.trim()}")
+        if (stop.code != 0) return false
+        val probe = runOpd2515RootCommand(su, "id")
+        onLog("<s> OPD2515 direct handoff probe exit=${probe.code} output=${probe.output.trim()}")
+        return probe.code == 0 && Regex("(^|\\s)uid=0(?:\\(|\\s|$)").containsMatchIn(probe.output)
+    }
+
+    private data class Opd2515RootCommandResult(val code: Int, val output: String)
+
+    private fun runOpd2515RootCommand(su: File, command: String): Opd2515RootCommandResult {
+        val process = ProcessBuilder(su.absolutePath, "-c", command)
+            .redirectErrorStream(true)
+            .start()
+        if (!process.waitFor(5, TimeUnit.SECONDS)) {
+            process.destroyForcibly()
+            return Opd2515RootCommandResult(124, "timeout")
+        }
+        return Opd2515RootCommandResult(
+            process.exitValue(),
+            process.inputStream.bufferedReader().use { it.readText() },
+        )
     }
 
     override suspend fun lastRunStuckStep(): String? = withContext(Dispatchers.IO) {
@@ -742,7 +953,7 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
 
     /** Exact target gate shared by the preloader selector and Shizuku guard. */
     private fun isOpd2515Target(release: String): Boolean =
-        release == Opd2515Release && Build.MODEL.trim() == "OPD2515"
+        release == Opd2515Release && Build.MODEL.trim() == Opd2515Model
 
     override suspend fun readDocument(uri: String): String =
         appContext.contentResolver.openInputStream(uri.toUri())?.bufferedReader()?.use { it.readText() } ?: throw IOException("cannot open $uri")
@@ -976,7 +1187,9 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
 
     private fun isKernelSupported(): Boolean {
         val version = System.getProperty("os.version", "").orEmpty()
-        if (isOpd2515Target(version) && !Opd2515PreloaderValidated) return false
+        if (isOpd2515Target(version) &&
+            !Opd2515PreloaderValidated && !Opd2515DirectExperimental
+        ) return false
         return version in builtinProfiles.unames || importedOffsetsMatch(version)
     }
 

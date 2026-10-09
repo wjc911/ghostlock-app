@@ -114,7 +114,16 @@ jobs:
           export KEYSTORE_PASS="${{ secrets.KEY_STORE_PASSWORD }}"
           export KEY_ALIAS="${{ secrets.ALIAS }}"
           export KEY_PASSWORD="${{ secrets.KEY_PASSWORD }}"
-          ./gradlew :app:assembleRelease -PforkApplicationId=com.ghostlock.opd2515.legacy --no-daemon
+          app_id=com.ghostlock.opd2515.legacy
+          experimental_property=""
+          if [[ "$GITHUB_REF_NAME" == "opd2515-direct-app-experimental" ]]; then
+            app_id=com.ghostlock.opd2515.experimental
+            experimental_property="-Popd2515DirectExperimental=true"
+          fi
+          ./gradlew :app:assembleRelease \
+            -PforkApplicationId="$app_id" \
+            $experimental_property \
+            --no-daemon
 
       - name: Verify OPD2515 packaged preloader
         run: |
