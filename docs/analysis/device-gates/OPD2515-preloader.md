@@ -57,6 +57,34 @@ UBSAN reboot. This is an offline build-evidence record, not yet a current-device
 PASS: the cold-start gate still requires uid 0, 30-second stability, and the
 post-reboot no-root checks above.
 
+## 2026-10-09 — Batch G current-device PASS
+
+The fork APK built from the historical standalone route was installed and run
+once on the exact device after a clean reboot. The run used the Shizuku
+UserService; no direct app-UID route and no split guard library were used.
+
+- APK: `GhostLock-release-legacy-r27.apk`
+- APK SHA-256: `C03CE83899A78A4747DC9D379ECE5C0C368591E84EA4FF488B95C182A3581AD2`
+- Packaged standalone preloader: 91424 bytes
+- Preloader SHA-256: `01C7FE7FEAF5DB79AA239CF76CA7C0DDB909BE9747FCCFAF794A9420D7A4441C`
+- Shizuku preflight: UID 2000, `Seccomp: 0`, `u:r:shell:s0`
+- Native evidence: `slide-kaslr-ok`, `direct credential result uid=0`,
+  `embedded su daemon ready`, `direct-root-summary root=1`
+- Root handoff: `/data/local/tmp/su -c id` returned `uid=0(root)`
+- Anti-root guard: `oplus_kevent` and `com.oplus.exsystemservice` were in
+  `STAT=T` (temporarily stopped)
+- Stability: the device remained online with the su socket and uid 0 for more
+  than 40 seconds
+- Reboot gate: `ro.boot.bootreason=reboot,shell`, `sys.boot_completed=1`,
+  shell returned UID 2000, the su socket was absent, `/data/local/tmp/su -c
+  id` returned `Permission denied`, and both anti-root processes were running
+  again
+
+Result: **PASS — one-click GhostLock handoff after Shizuku is running; root is
+volatile and disappears on reboot.** Starting the Shizuku server still requires
+the ADB shell/USB-debugging step after each reboot because a normal application
+cannot create a UID-2000 shell process by itself on a locked bootloader.
+
 ## Run record template
 
 ```text

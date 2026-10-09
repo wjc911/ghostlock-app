@@ -116,6 +116,28 @@ jobs:
           export KEY_PASSWORD="${{ secrets.KEY_PASSWORD }}"
           ./gradlew :app:assembleRelease -PforkApplicationId=com.ghostlock.opd2515.legacy --no-daemon
 
+      - name: Verify OPD2515 packaged preloader
+        run: |
+          python3 - <<'PY'
+          import glob, hashlib, zipfile
+
+          apk = glob.glob('build/app/outputs/apk/release/*.apk')
+          if len(apk) != 1:
+              raise SystemExit(f'expected one release APK, found {apk!r}')
+          with zipfile.ZipFile(apk[0]) as archive:
+              data = archive.read('lib/arm64-v8a/libopd2515_preload.so')
+          digest = hashlib.sha256(data).hexdigest().upper()
+          known = {
+              '01C7FE7FEAF5DB79AA239CF76CA7C0DDB909BE9747FCCFAF794A9420D7A4441C': 91424,
+              'CCB15ABD51BB1B1122FF8E916CBE9DB89D3DC6BB162E8111335ED7B02B8FD4EE': 91720,
+          }
+          if known.get(digest) != len(data):
+              raise SystemExit(
+                  f'unknown OPD2515 preloader size/hash: {len(data)} {digest}'
+              )
+          print(f'OPD2515 packaged preloader size={len(data)} sha256={digest}')
+          PY
+
       - name: Strip Ghostlock binary
         run: |
           "${{ runner.temp }}/ondk/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" --strip-all build/native/ghostlock || true

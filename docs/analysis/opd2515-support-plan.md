@@ -350,3 +350,23 @@ UserService 的 `uid=2000` / `Seccomp=0` 门禁通过，两个 arm64 库的 hash
 没有 `uid=0` 或 `su` daemon。当时应用层把该 exact profile 标为
 fail-closed；Batch G 已完成离线布局审查，重新选用历史 standalone 输入，
 但仍需新的 APK 真机门禁才能改写为 PASS。
+
+### 批次 G 真机结论（2026-10-09）
+
+批次 G 已在同一台 OPD2515 上完成一次受控成功运行。使用的是历史
+standalone preloader 的 GhostLock APK，入口由 Shizuku UserService 以
+`uid=2000`、`Seccomp=0`、`u:r:shell:s0` 执行；没有使用应用 UID 路线、拆分
+`install_cred`/SELinux 写入，也没有加载独立 `root_guard.so`。日志同时记录了
+`direct credential result uid=0`、`embedded su daemon ready`、
+`direct-root-summary root=1`，随后 `/data/local/tmp/su -c id` 返回 `uid=0(root)`。
+
+设备在线观察超过 40 秒后主动重启。重启门禁通过：
+`ro.boot.bootreason=reboot,shell`、`sys.boot_completed=1`，普通 ADB shell
+仍为 UID 2000，`temp_su.sock` 不存在，`su -c id` 被拒绝，
+`oplus_kevent` 和 `com.oplus.exsystemservice` 重新运行。说明这条路径是临时
+root，未形成分区持久化，也没有复现 UBSAN 重启。
+
+因此，批次 G 当前设备结果为 **PASS**。需要保留的操作边界是：每次重启后仍须
+先通过 USB/无线 ADB 启动 Shizuku server；server 就绪后，GhostLock 内是一键
+执行。锁定 bootloader 下的普通 APK 不能自行创建 UID 2000 的 shell 进程，因而
+不能承诺“完全不经过 ADB 的重启后一键”。
