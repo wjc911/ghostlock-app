@@ -184,7 +184,14 @@ class GhostlockUserService(private val context: Context) : IGhostlockUserService
                 require(kernelRelease == Opd2515Release) {
                     "OPD2515 preloader kernel gate failed: $kernelRelease"
                 }
-                val selinuxContext = File("/proc/self/attr/current").readText().trim()
+                // Android exposes the current SELinux label through a procfs
+                // string that may carry a trailing NUL on this device. Keep
+                // the exact-label gate, but normalize only terminal
+                // whitespace/NUL bytes so a valid shell context is not
+                // rejected by an implementation detail of procfs.
+                val selinuxContext = File("/proc/self/attr/current")
+                    .readText()
+                    .trim { it.isWhitespace() || it == '\u0000' }
                 require(selinuxContext == "u:r:shell:s0") {
                     "OPD2515 preloader SELinux gate failed: $selinuxContext"
                 }

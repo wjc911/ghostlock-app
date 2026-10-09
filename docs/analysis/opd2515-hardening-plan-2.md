@@ -16,6 +16,8 @@ new boot's staging run through leftover permissions or symbolic links.
 3. Remove a pre-existing staged payload path after the directory is private;
    this makes a stale link harmless before the copy.
 4. Use a boot-specific native log name and reject a symbolic-link log path.
+5. Normalize the terminal NUL emitted by this device's procfs SELinux label,
+   while keeping the exact `u:r:shell:s0` comparison.
 
 The native preloader, its one-shot boot marker, timeout, hash allow-list,
 model/kernel/SELinux gates, and postflight probe remain unchanged.
