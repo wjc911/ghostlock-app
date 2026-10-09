@@ -30,6 +30,13 @@ class GhostlockUserService(private val context: Context) : IGhostlockUserService
         const val Opd2515PreloaderHash91720 =
             "CCB15ABD51BB1B1122FF8E916CBE9DB89D3DC6BB162E8111335ED7B02B8FD4EE"
         const val Opd2515PreloaderTimeoutMs = 30_000L
+        // A malformed profile or log line must never turn a shell UserService
+        // into an unbounded memory/process holder.  The normal profile is far
+        // smaller than this cap; the limit is deliberately generous for
+        // future profile additions while still being a hard resource bound.
+        const val MaxProfileBlobBytes = 8 * 1024 * 1024
+        const val MaxRelayLineChars = 64 * 1024
+        const val NativeProcessTimeoutMs = 5 * 60_000L
     }
 
     override fun runExploit(
@@ -58,6 +65,9 @@ class GhostlockUserService(private val context: Context) : IGhostlockUserService
                 }
                 val release = System.getProperty("os.version", "").orEmpty()
                 require(profileBlob.size >= 16) { "profile blob is too short" }
+                require(profileBlob.size <= MaxProfileBlobBytes) {
+                    "profile blob is too large: ${profileBlob.size} bytes"
+                }
                 // PROFILE-SUGGEST-01: recommend_shizuku is a suggestion; the
                 // blob's meta section carries it, and the app already chose the
                 // Shizuku path, so it is logged, never a gate.
@@ -135,11 +145,26 @@ class GhostlockUserService(private val context: Context) : IGhostlockUserService
                             isDaemon = true
                             start()
                         }
-                        val exitCode = process.waitFor()
+                        val finished = process.waitFor(
+                            NativeProcessTimeoutMs,
+                            TimeUnit.MILLISECONDS,
+                        )
+                        val exitCode = if (finished) {
+                            process.exitValue()
+                        } else {
+                            callback.onLog(
+                                "<s> native timed out after " +
+                                    "${NativeProcessTimeoutMs / 1000}s; terminating it",
+                            )
+                            process.destroyForcibly()
+                            process.waitFor(1, TimeUnit.SECONDS)
+                            124
+                        }
                         callback.onLog("<b> native exited code=$exitCode")
                         Thread.sleep(200)
                         tailer.interrupt()
                         tailer.join(1000)
+                        runCatching { stdinOut.close() }
                         exitCode
                     }
             }.getOrElse { error ->
@@ -206,6 +231,9 @@ class GhostlockUserService(private val context: Context) : IGhostlockUserService
                     "unrecognized OPD2515 preloader SHA-256: $sourceHash"
                 }
                 val workDir = File(Opd2515WorkDir).apply {
+                    require(!Files.isSymbolicLink(toPath())) {
+                        "OPD2515 work directory is a symbolic link; refusing preloader"
+                    }
                     require(isDirectory || mkdirs()) { "cannot create $absolutePath" }
                     // /data/local/tmp is shared and world-writable. Keep this
                     // staging directory private to the shell owner so another
@@ -235,6 +263,9 @@ class GhostlockUserService(private val context: Context) : IGhostlockUserService
                 require(!Files.isSymbolicLink(bootMarker.toPath())) {
                     "OPD2515 boot marker is a symbolic link; refusing preloader"
                 }
+                require(!bootMarker.exists() || bootMarker.isFile) {
+                    "OPD2515 boot marker is not a regular file; refusing preloader"
+                }
                 val previousBootId = if (bootMarker.isFile) {
                     bootMarker.readText().trim()
                 } else {
@@ -245,6 +276,12 @@ class GhostlockUserService(private val context: Context) : IGhostlockUserService
                 }
 
                 val existingSu = File("/data/local/tmp/su")
+                require(!Files.isSymbolicLink(existingSu.toPath())) {
+                    "temporary su is a symbolic link; refusing preloader"
+                }
+                require(!existingSu.exists() || existingSu.isFile) {
+                    "temporary su is not a regular file; refusing preloader"
+                }
                 if (existingSu.isFile) {
                     val probe = runRootCommand(existingSu, "id")
                     val activeRoot = probe.code == 0 &&
@@ -394,6 +431,10 @@ class GhostlockUserService(private val context: Context) : IGhostlockUserService
      */
     private fun runRootPostflight(callback: IGhostlockCallback): Boolean {
         val su = File("/data/local/tmp/su")
+        if (Files.isSymbolicLink(su.toPath())) {
+            callback.onLog("<s> root postflight: temporary su is a symbolic link")
+            return false
+        }
         if (!su.isFile) {
             callback.onLog("<s> root postflight: temporary su is missing")
             return false
@@ -453,8 +494,10 @@ class GhostlockUserService(private val context: Context) : IGhostlockUserService
                                 pending.clear()
                                 offset = handle.filePointer
                                 if (line.isNotEmpty()) runCatching { callback.onLog(line) }
-                            } else {
+                            } else if (pending.length < MaxRelayLineChars) {
                                 pending.append(byte.toChar())
+                            } else if (pending.length == MaxRelayLineChars) {
+                                pending.append("…")
                             }
                         }
                     }
@@ -528,8 +571,10 @@ class GhostlockUserService(private val context: Context) : IGhostlockUserService
                                         runCatching { callback.onLog(line) }
                                     }
                                 }
-                            } else {
+                            } else if (pending.length < MaxRelayLineChars) {
                                 pending.append(byte.toChar())
+                            } else if (pending.length == MaxRelayLineChars) {
+                                pending.append("…")
                             }
                         }
                     }
