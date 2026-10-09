@@ -660,29 +660,31 @@ static int run_direct_root_stage(void) {
     return 0;
   }
   /*
-   * The OPD2515 anti-root service starts its reboot timer as soon as this
-   * task becomes uid 0.  The historical route used to wait until the SELinux
-   * follow-up, policy reload, and su handoff had all completed before
-   * freezing that service.  Under scheduler contention that window can exceed
-   * the timer even though the credential write has already succeeded.  Stop
-   * the service immediately after the first credential write, then finish the
-   * remaining credential/SELinux handoff.  This is volatile (SIGSTOP only)
-   * and is safe to repeat at the final postflight.
+   * Do not bundle the effective-cred write with the SELinux write.  The
+   * follow-up primitive executes both writes in a child while the parent is
+   * blocked in waitpid(), so the parent cannot freeze OPPO's anti-root
+   * service during the short window in which this task becomes uid 0.  Make
+   * the cred write return first, give the parent an immediate guard attempt,
+   * then clear SELinux and guard again.  This keeps the same two kernel writes
+   * while removing the unobservable race window.
    */
-  if (getuid() == 0 || geteuid() == 0) {
-    int early_guard = stop_oplus_exsystemservice();
-    pr_success("early anti-root guard uid=%u euid=%u stopped=%d\n",
-               getuid(), geteuid(), early_guard);
-  } else {
-    pr_warning("early anti-root guard skipped uid=%u euid=%u\n",
-               getuid(), geteuid());
-  }
-  if (!direct_trigger_write64_followup(
-          "install_cred_then_selinux_zero", cred_slot, init_cred, 1,
-          selinux_target, &write_idx)) {
+  if (!direct_trigger_write64(
+          "install_cred", cred_slot, init_cred, 1, &write_idx)) {
     pr_error("direct cred install failed\n");
     return 0;
   }
+  int early_guard_cred = stop_oplus_exsystemservice();
+  pr_success("early anti-root guard after-cred uid=%u euid=%u stopped=%d\n",
+             getuid(), geteuid(), early_guard_cred);
+
+  if (!direct_trigger_write64(
+          "selinux_zero", selinux_target, 0, 1, &write_idx)) {
+    pr_error("direct selinux zero failed\n");
+    return 0;
+  }
+  int early_guard_selinux = stop_oplus_exsystemservice();
+  pr_success("early anti-root guard after-selinux uid=%u euid=%u stopped=%d\n",
+             getuid(), geteuid(), early_guard_selinux);
 
   if (!restore_initial_affinity()) {
     pr_warning("restore initial CPU affinity failed errno=%d\n", errno);
