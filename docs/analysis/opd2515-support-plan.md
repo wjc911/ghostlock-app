@@ -393,3 +393,15 @@ APK 现在在启动 standalone preloader 前 fail-closed：
 这些改动保持历史 preloader 字节和临时 root 模型不变，只增加安全边界和
 可诊断性；它们不是新的 exploit，也不能让锁定 bootloader 的平板在重启后
 自动获得 root。重启后仍需要先让 Shizuku server 以 shell UID 运行。
+
+### 批次 I：重启后免 ADB 检查（2026-10-09）
+
+已实际重启验证：Shizuku 的 `LOCKED_BOOT_COMPLETED` 接收器确实被系统调用，
+但调用时 Wi-Fi 还没有完成关联。Android/ColorOS 记录
+`Not connected to any wireless network. Not enabling adbwifi`，随后
+`adb_wifi_enabled` 回到 `0`，Shizuku server 没有留下来。普通 APK 不能发送
+受保护的 `BOOT_COMPLETED` 广播，也不能凭自身 UID 创建 Shizuku 所需的
+shell（UID 2000）进程，因此这条“完全不经过 ADB 的重启后一键 root”在当前
+锁定 bootloader 和系统策略下不可验证、也不应通过后台自动运行 exploit 来
+冒险模拟。当前 APK 继续采用 fail-closed：先让 Shizuku shell server 就绪，
+再由用户点击一次；若检测到上一轮 kernel panic，则本次开机直接拒绝 payload。

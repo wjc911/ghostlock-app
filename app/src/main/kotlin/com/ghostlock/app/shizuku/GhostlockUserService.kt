@@ -28,6 +28,7 @@ class GhostlockUserService(private val context: Context) : IGhostlockUserService
             "01C7FE7FEAF5DB79AA239CF76CA7C0DDB909BE9747FCCFAF794A9420D7A4441C"
         const val Opd2515PreloaderHash91720 =
             "CCB15ABD51BB1B1122FF8E916CBE9DB89D3DC6BB162E8111335ED7B02B8FD4EE"
+        const val Opd2515PreloaderTimeoutMs = 30_000L
     }
 
     override fun runExploit(
@@ -198,6 +199,12 @@ class GhostlockUserService(private val context: Context) : IGhostlockUserService
                 }
                 val workDir = File(Opd2515WorkDir).apply {
                     require(isDirectory || mkdirs()) { "cannot create $absolutePath" }
+                    // /data/local/tmp is shared and world-writable. Keep this
+                    // staging directory private to the shell owner so another
+                    // app cannot replace the payload between hash and exec.
+                    require(setReadable(true, false)) { "cannot make $absolutePath readable" }
+                    require(setWritable(true, true)) { "cannot make $absolutePath writable" }
+                    require(setExecutable(true, false)) { "cannot make $absolutePath searchable" }
                 }
                 val bootId = File("/proc/sys/kernel/random/boot_id").readText().trim()
                 require(bootId.isNotEmpty()) { "kernel boot_id is unavailable; refusing preloader" }
@@ -245,10 +252,13 @@ class GhostlockUserService(private val context: Context) : IGhostlockUserService
                 callback.onLog(
                     "<s> OPD2515 preflight: attempt marker written to ${bootMarker.absolutePath}",
                 )
-                val staged = File(workDir, "libopd2515_preload.so")
+                // Use a boot-specific name so an immutable payload from an
+                // earlier boot is never overwritten in-place.
+                val staged = File(workDir, "libopd2515_preload-$bootId.so")
                 source.copyTo(staged, overwrite = true)
-                staged.setReadable(true, false)
-                staged.setExecutable(true, false)
+                require(staged.setReadable(true, false)) { "cannot make staged preloader readable" }
+                require(staged.setWritable(false, false)) { "cannot make staged preloader immutable" }
+                require(staged.setExecutable(true, false)) { "cannot make staged preloader executable" }
                 require(sha256(staged).uppercase() == sourceHash) {
                     "staged OPD2515 preloader hash changed during copy"
                 }
@@ -284,7 +294,17 @@ class GhostlockUserService(private val context: Context) : IGhostlockUserService
                             isDaemon = true
                             start()
                         }
-                        var code = process.waitFor()
+                        var code = if (process.waitFor(Opd2515PreloaderTimeoutMs, TimeUnit.MILLISECONDS)) {
+                            process.exitValue()
+                        } else {
+                            callback.onLog(
+                                "<s> OPD2515 preloader timed out after " +
+                                    "${Opd2515PreloaderTimeoutMs / 1000}s; terminating it",
+                            )
+                            process.destroyForcibly()
+                            process.waitFor(1, TimeUnit.SECONDS)
+                            124
+                        }
                         callback.onLog("<b> OPD2515 preloader exited code=$code")
                         tailer.interrupt()
                         tailer.join(1000)

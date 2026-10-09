@@ -26,6 +26,7 @@ route is stable.
 | File | Change | Reason |
 | --- | --- | --- |
 | `app/src/main/kotlin/com/ghostlock/app/shizuku/GhostlockUserService.kt` | Add exact model/kernel/SELinux and known-SHA preflight, boot ID / bootreason checks, per-boot marker, stale `su` probe, and explicit logs. | Reject wrong execution environments, unknown payloads, unsafe boot states, and duplicate attempts before starting the native process. |
+| `app/src/main/kotlin/com/ghostlock/app/shizuku/GhostlockUserService.kt` | Tighten the per-app staging directory and cap the standalone preloader at 30 seconds. | Prevent shared-temp replacement and an unbounded UserService/native hang. |
 | `app/src/main/kotlin/com/ghostlock/app/shizuku/ShizukuExploitRunner.kt` | Do not retry a preloader UserService connection. | A reconnect can otherwise launch the high-risk route more than once after a partial failure. |
 | `docs/analysis/device-gates/OPD2515-preloader.md` | Record the repeat panic and the new safety boundaries. | Keep PASS and FAIL evidence together and prevent the old one-run PASS from being overstated. |
 | `docs/analysis/opd2515-support-plan.md` | Add the robustness batch and the no-ADB limitation. | Make the operational contract discoverable. |
@@ -79,6 +80,18 @@ The historical preloader sources, exact compiler input, anti-root stop logic,
 postflight `su` probe, locked bootloader assumptions, and temporary-root
 semantics remain unchanged. No automatic reboot, no persistent service, and no
 new kernel exploit variant are introduced in this batch.
+
+## Batch I — clean reboot and Shizuku auto-start check
+
+The tablet was rebooted with Shizuku's ADB launch mode recorded and its boot
+receiver present. The receiver did run at `LOCKED_BOOT_COMPLETED`, but ColorOS
+delivered that broadcast before `wlan0` had an address. Android logged
+`Not connected to any wireless network. Not enabling adbwifi`; after boot,
+`adb_wifi_enabled` was back to `0` and no `shizuku_server` process existed.
+This is a platform timing/policy limit, not an app crash. The GhostLock app
+cannot send the protected boot broadcast or create a shell-UID service by
+itself, so it does not add a background exploit retry or an unencrypted
+TCP-ADB fallback.
 
 ## Progress
 
