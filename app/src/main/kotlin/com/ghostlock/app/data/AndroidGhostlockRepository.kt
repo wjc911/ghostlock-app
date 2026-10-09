@@ -676,6 +676,8 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
 
             val nativeLog = File(filesDir, ".ghostlock-opd2515-direct-$bootId.log")
             if (nativeLog.exists()) require(nativeLog.delete()) { "cannot remove stale direct log" }
+            val brokerLog = File(filesDir, ".ghostlock-opd2515-broker-$bootId.log")
+            if (brokerLog.exists()) require(brokerLog.delete()) { "cannot remove stale broker log" }
             val ready = File(filesDir, Opd2515DirectReadyName)
             require(!Files.isSymbolicLink(ready.toPath())) {
                 "OPD2515 direct ready marker is a symbolic link"
@@ -701,7 +703,7 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
             }
             val launch =
                 "/system/bin/sh ${shellQuote(broker.absolutePath)} " +
-                    "</dev/null >${shellQuote(nativeLog.absolutePath)} 2>&1 &"
+                    "</dev/null >${shellQuote(brokerLog.absolutePath)} 2>&1 &"
             /* Match the validated X9U app flow: the preloader is loaded by a
              * normal system shell started from the app, and the root-side
              * broker is spawned by that same shell after the constructor has
@@ -734,6 +736,14 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
             if (nativeBytes.isNotEmpty()) {
                 writeSidecar("opd2515-direct-preloader.log", nativeBytes)
                 nativeText
+                    .lineSequence()
+                    .filter { it.isNotBlank() }
+                    .forEach(onLog)
+            }
+            val brokerBytes = runCatching { brokerLog.readBytes() }.getOrDefault(ByteArray(0))
+            if (brokerBytes.isNotEmpty()) {
+                writeSidecar("opd2515-direct-broker.log", brokerBytes)
+                String(brokerBytes, StandardCharsets.UTF_8)
                     .lineSequence()
                     .filter { it.isNotBlank() }
                     .forEach(onLog)

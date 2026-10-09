@@ -85,6 +85,9 @@ root 与 `su` daemon 本身是易失状态，重启后消失。源码回滚只�
   该公开源码和 OPD2515 target header 重建的 `libopd2515_x9u_rebuilt_preload.so`
   （89,832 bytes，SHA-256 固定）；实验 APK 优先使用后者，不能将任一产物当成
   OPD2515 已完成真机验证；
+- 当前重建输入固定为 `koaaN/x9u-preload-builder@18808341a788c2ccb5fb3f071d37d6009c959199`、
+  OPD2515 `x9u-target-generated.h`，Windows NDK r27（clang 18.0.1）；产物 hash 是
+  构建审计值，不是实机成功证明。
 - 不执行分区写入、GBL chainload 或 bootloader 解锁。
 
 ## 同内核证据与实现差异
