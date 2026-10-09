@@ -1,7 +1,7 @@
 package com.ghostlock.app.boot
 
-import android.app.JobInfo
-import android.app.JobScheduler
+import android.app.job.JobInfo
+import android.app.job.JobScheduler
 import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
