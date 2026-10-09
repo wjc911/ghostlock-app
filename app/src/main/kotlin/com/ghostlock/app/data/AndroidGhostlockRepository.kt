@@ -728,7 +728,10 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
             val code = if (finished) {
                 process.exitValue()
             } else {
-                onLog("<s> OPD2515 direct preloader timed out after 30s; terminating it")
+                onLog(
+                    "<s> OPD2515 direct preloader timed out after " +
+                        "${Opd2515PreloaderTimeoutMs / 1000}s; terminating it",
+                )
                 process.destroyForcibly()
                 process.waitFor(1, TimeUnit.SECONDS)
                 124
