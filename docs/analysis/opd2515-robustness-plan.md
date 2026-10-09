@@ -28,6 +28,8 @@ route is stable.
 | `app/src/main/kotlin/com/ghostlock/app/shizuku/GhostlockUserService.kt` | Add exact model/kernel/SELinux and known-SHA preflight, boot ID / bootreason checks, per-boot marker, stale `su` probe, and explicit logs. | Reject wrong execution environments, unknown payloads, unsafe boot states, and duplicate attempts before starting the native process. |
 | `app/src/main/kotlin/com/ghostlock/app/shizuku/GhostlockUserService.kt` | Tighten the per-app staging directory and cap the standalone preloader at 30 seconds. | Prevent shared-temp replacement and an unbounded UserService/native hang. |
 | `app/src/main/kotlin/com/ghostlock/app/shizuku/ShizukuExploitRunner.kt` | Do not retry a preloader UserService connection. | A reconnect can otherwise launch the high-risk route more than once after a partial failure. |
+| `app/src/main/kotlin/com/ghostlock/app/boot/BootRelayReceiver.kt` | Schedule one direct-boot/network-aware Shizuku relay job. | Give ColorOS one safe retry point after Wi-Fi is available without touching the native payload. |
+| `app/src/main/kotlin/com/ghostlock/app/boot/ShizukuBootRelayJobService.kt` | Attempt Shizuku's exported boot receiver once and finish the job on all paths. | Reuse Shizuku's own ADB-key path when the platform permits it; catch protected-broadcast rejection and fail closed. |
 | `docs/analysis/device-gates/OPD2515-preloader.md` | Record the repeat panic and the new safety boundaries. | Keep PASS and FAIL evidence together and prevent the old one-run PASS from being overstated. |
 | `docs/analysis/opd2515-support-plan.md` | Add the robustness batch and the no-ADB limitation. | Make the operational contract discoverable. |
 
@@ -93,9 +95,30 @@ cannot send the protected boot broadcast or create a shell-UID service by
 itself, so it does not add a background exploit retry or an unencrypted
 TCP-ADB fallback.
 
+## Batch II — safe relay verification on OPD2515
+
+Build `versionCode=593` was installed on the exact OPD2515 target after the
+preloader route had been disabled. The UI reported `不支持 / 未找到匹配的内核配置`;
+the Shizuku switch was hidden for this unsupported target. A real reboot then
+produced the following safe sequence:
+
+1. ColorOS delivered `LOCKED_BOOT_COMPLETED` to `BootRelayReceiver`.
+2. Job `4672578` (`0x474c42`) started and finished once.
+3. The job's explicit `BOOT_COMPLETED` handoff to Shizuku was rejected by
+   ActivityManager: `Permission Denial: not allowed to send broadcast
+   android.intent.action.BOOT_COMPLETED from pid=8730, uid=10049`.
+4. No `shizuku_server` process appeared, `adb_wifi_enabled` remained `0`, and
+   the native GhostLock payload was never invoked.
+
+The relay is therefore a harmless best-effort compatibility hook, not a
+promise of no-ADB startup. A normal APK cannot create UID 2000, write
+`WRITE_SECURE_SETTINGS`, or send a protected boot broadcast. Guaranteeing
+post-reboot Shizuku startup would require a privileged/modified Shizuku path,
+device-owner privileges, or a validated root route.
+
 ## Progress
 
 - [x] Record baseline and failure evidence.
 - [x] Add Kotlin guards.
-- [ ] Run host/CI verification.
-- [ ] Install without executing on the current panic boot.
+- [x] Run host/CI verification (GitHub Actions run `37946642297`, 10m27s).
+- [x] Install and reboot-test without executing the OPD2515 native payload.
