@@ -7,6 +7,7 @@ import androidx.annotation.Keep
 import com.ghostlock.app.data.NativeProfileDocument
 import java.io.File
 import java.io.RandomAccessFile
+import java.nio.file.Files
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.TimeUnit
 import java.security.MessageDigest
@@ -205,7 +206,9 @@ class GhostlockUserService(private val context: Context) : IGhostlockUserService
                     require(setReadable(false, false) && setReadable(true, true)) {
                         "cannot make $absolutePath owner-readable"
                     }
-                    require(setWritable(true, true)) { "cannot make $absolutePath writable" }
+                    require(setWritable(false, false) && setWritable(true, true)) {
+                        "cannot make $absolutePath owner-writable"
+                    }
                     require(setExecutable(false, false) && setExecutable(true, true)) {
                         "cannot make $absolutePath owner-searchable"
                     }
@@ -222,6 +225,9 @@ class GhostlockUserService(private val context: Context) : IGhostlockUserService
                 }
 
                 val bootMarker = File(workDir, Opd2515BootMarkerName)
+                require(!Files.isSymbolicLink(bootMarker.toPath())) {
+                    "OPD2515 boot marker is a symbolic link; refusing preloader"
+                }
                 val previousBootId = if (bootMarker.isFile) {
                     bootMarker.readText().trim()
                 } else {
@@ -259,6 +265,9 @@ class GhostlockUserService(private val context: Context) : IGhostlockUserService
                 // Use a boot-specific name so an immutable payload from an
                 // earlier boot is never overwritten in-place.
                 val staged = File(workDir, "libopd2515_preload-$bootId.so")
+                if (Files.isSymbolicLink(staged.toPath()) || staged.exists()) {
+                    require(staged.delete()) { "cannot remove stale staged preloader" }
+                }
                 source.copyTo(staged, overwrite = true)
                 require(staged.setReadable(false, false) && staged.setReadable(true, true)) {
                     "cannot make staged preloader owner-readable"
@@ -270,7 +279,13 @@ class GhostlockUserService(private val context: Context) : IGhostlockUserService
                 require(sha256(staged).uppercase() == sourceHash) {
                     "staged OPD2515 preloader hash changed during copy"
                 }
-                val nativeLog = File(workDir, ".ghostlock-opd2515-preloader.log")
+                val nativeLog = File(workDir, ".ghostlock-opd2515-preloader-$bootId.log")
+                require(!Files.isSymbolicLink(nativeLog.toPath())) {
+                    "OPD2515 native log is a symbolic link; refusing preloader"
+                }
+                if (nativeLog.exists()) {
+                    require(nativeLog.delete()) { "cannot remove stale OPD2515 native log" }
+                }
                 callback.onLog(
                     "<s> OPD2515 preloader ready: uid=${Process.myUid()} Seccomp=0 " +
                         "selinux=$selinuxContext preloader=${staged.absolutePath} " +
