@@ -314,7 +314,16 @@ flowchart TD
 ## 批次 F 进度
 
 - [x] 完成独立 guard 设计和精确进程名核对
-- [ ] 删除 preloader 内置 guard 并接入源码构建
-- [ ] 完成 APK 打包、主机测试和 CI 构建
-- [ ] 完成当前设备冷机真机门禁
-- [ ] 完成重启后无 root/无 daemon 复核
+- [x] 删除 preloader 内置 guard 并接入源码构建
+- [x] 完成 APK 打包、CI 构建和安装核对
+- [x] 完成当前设备冷机真机门禁（结果：FAIL，kernel UBSAN reboot）
+- [x] 完成重启后无 root/无 daemon 复核（结果：普通 shell，临时 su 不可用）
+
+### 批次 F 真机结论
+
+本批次证明了入口隔离和日志链路，但没有证明提权成功。Shizuku
+UserService 的 `uid=2000` / `Seccomp=0` 门禁通过，两个 arm64 库的 hash
+也与 APK 一致；首次执行在 `slide requeue` 后触发
+`kernel_panic,ubsan:_array_index_out_of_bounds:_fatal_exception`，设备重启，
+没有 `uid=0` 或 `su` daemon。应用层已把该 exact profile 标为 fail-closed，
+在没有新的离线布局审查和完整真机门禁之前不再运行这条路径。

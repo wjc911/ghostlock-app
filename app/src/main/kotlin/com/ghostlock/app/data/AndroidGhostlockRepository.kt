@@ -46,6 +46,14 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
         const val ExtractBinaryName = "libextract.so"
         const val Opd2515Release =
             "6.12.58-android16-6-g7704a1ae279b-ab15213644-4k"
+        /*
+         * The shell-UID preloader is integrated, but the exact-device gate is
+         * deliberately closed until a clean run proves uid=0 and 30-second
+         * stability. The 2026-10-09 run ended in a kernel UBSAN reboot;
+         * exposing that route as supported would make the failure repeatable.
+         * Flip only together with the device-gate record and a new APK build.
+         */
+        const val Opd2515PreloaderValidated = false
         const val DefaultDebugLocation = "Download/ghostlock-debug-log"
         const val PrefForceAttackTest = "force_attack_test"
         const val PrefDebugExportEnabled = "debug_export_enabled"
@@ -412,6 +420,14 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
             archivedLog("<s> resolving profile")
             val release = System.getProperty("os.version", "").orEmpty()
             if (isOpd2515Target(release)) {
+                if (!Opd2515PreloaderValidated) {
+                    archivedLog(
+                        "<s> error: exact OPD2515 preloader is disabled after " +
+                            "the kernel-UBSAN reboot; no retry is permitted until " +
+                            "the device gate is PASS",
+                    )
+                    return@withDebugAttackLog 3
+                }
                 archivedLog("<b> exact OPD2515: selecting shell-UID preloader via Shizuku")
                 resetRunState()
                 return@withDebugAttackLog shizukuRunner.run(
@@ -949,6 +965,7 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
 
     private fun isKernelSupported(): Boolean {
         val version = System.getProperty("os.version", "").orEmpty()
+        if (isOpd2515Target(version) && !Opd2515PreloaderValidated) return false
         return version in builtinProfiles.unames || importedOffsetsMatch(version)
     }
 
