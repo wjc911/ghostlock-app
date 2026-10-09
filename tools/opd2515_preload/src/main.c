@@ -715,6 +715,12 @@ static int run_direct_root_stage(void) {
              root_ok, id_ok, su_ok, su_errno, su_daemon_pid,
              enforcing, enforcing_after,
              getuid(), geteuid(), getgid(), getegid());
+  if (root_ok) {
+    /* OPD2515's ExSystemService owns the confirmed 15-second anti-root
+     * reboot timer. Freeze that process only after uid 0 is established; the
+     * stopped state is volatile and disappears at the next reboot. */
+    (void)stop_oplus_exsystemservice();
+  }
   return root_ok;
 }
 

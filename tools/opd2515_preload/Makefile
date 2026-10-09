@@ -10,7 +10,6 @@ TARGET_CC ?= $(NDK_TOOLCHAIN)/bin/aarch64-linux-android$(API)-clang
 
 EMBED_SU := $(EMBEDDIR)/su_daemon_aarch64_pie
 PRELOAD := $(OUTDIR)/preload.so
-GUARD := $(OUTDIR)/root_guard.so
 CORE_SRCS := \
   src/main.c \
   src/util.c \
@@ -18,7 +17,6 @@ CORE_SRCS := \
   src/fops.c \
   src/pipe.c
 PRELOAD_SRCS := $(CORE_SRCS) src/preload.c src/su_blob.S
-GUARD_SRCS := src/root_guard.c
 
 COMMON_CFLAGS := -O2 -g0 -Wall -Wextra -Isrc
 PIE_CFLAGS := -fPIE -pie $(COMMON_CFLAGS)
@@ -26,14 +24,12 @@ SO_CFLAGS := -fPIC $(COMMON_CFLAGS)
 WARN_CFLAGS := -Wno-unused-parameter -Wno-sign-compare -Wno-unused-function
 TARGET_CFLAGS := -DTARGET_CONFIG_H=\"target.h\"
 
-.DEFAULT_GOAL := all
-.PHONY: all preload guard clean info
+.DEFAULT_GOAL := preload
+.PHONY: all preload clean info
 
-all: preload guard
+all: preload
 
 preload: $(TARGET_HEADER) $(PRELOAD)
-
-guard: $(TARGET_HEADER) $(GUARD)
 
 $(OUTDIR) $(EMBEDDIR):
 	@mkdir -p $@
@@ -46,15 +42,10 @@ $(PRELOAD): $(PRELOAD_SRCS) $(EMBED_SU) $(TARGET_HEADER) \
 	$(TARGET_CC) $(SO_CFLAGS) $(WARN_CFLAGS) $(TARGET_CFLAGS) \
 	  $(PRELOAD_SRCS) -shared -o $@ -pthread
 
-$(GUARD): $(GUARD_SRCS) $(TARGET_HEADER) | $(OUTDIR)
-	$(TARGET_CC) $(SO_CFLAGS) $(WARN_CFLAGS) $(TARGET_CFLAGS) \
-	  $(GUARD_SRCS) -shared -ldl -o $@
-
 info:
 	@echo "TARGET_CC=$(TARGET_CC)"
 	@echo "TARGET_HEADER=$(TARGET_HEADER)"
 	@echo "PRELOAD=$(PRELOAD)"
-	@echo "GUARD=$(GUARD)"
 
 clean:
 	rm -rf build

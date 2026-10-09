@@ -236,7 +236,10 @@ result-set 读写验证和失败即停止的门禁。
    `uid=0`、`direct-root-summary root=1`、`su` socket 和无 panic。
 4. 失败时只收集日志和 `bootreason`，不重试、不切换 shift。
 
-## 批次 F：独立 anti-root guard 与一键入口（2026-10-09）
+## 批次 F：独立 anti-root guard 与一键入口（2026-10-09，已否定）
+
+以下内容只记录已否定的 Batch F，保留它是为了解释那次 UBSAN 重启；当前
+源码和构建入口以文末 Batch G 为准。
 
 批次 E 的入口已经把执行环境固定到 Shizuku shell UID，但现有源码仍把
 `ExSystemService` 停止逻辑编译进 preloader。这个内置逻辑会改变已验证
@@ -290,7 +293,7 @@ flowchart TD
 | `AndroidGhostlockRepository.kt` | 删除应用 UID 旧 preloader 分支并保持 fail-closed | 防止误触发已失败路径 |
 | `docs/analysis/device-gates/OPD2515-preloader.md` | 记录冷机安装、运行、重启后复核 | 给成功和 panic/reboot 都留下证据 |
 
-### 验证门槛
+### 批次 F 验证门槛（历史）
 
 1. 源码检查确认 preloader 不再引用 `stop_oplus_exsystemservice`，而
    `root_guard.c` 只包含进程扫描、`SIGSTOP` 和 `fork` 拦截。
@@ -304,7 +307,7 @@ flowchart TD
 5. 任何 kernel panic、自动重启、hash/target 不匹配均为 FAIL；不自动
    重试 shift 或替换 preloader 二进制。
 
-### 明确保留
+### 批次 F 明确保留（历史）
 
 - 不修改 `kernelsnitch/`、v1 profile converter、现有三条通用 route。
 - 不提交预编译 exploit 二进制；CI 从 C 源码构建两份库。
@@ -319,11 +322,31 @@ flowchart TD
 - [x] 完成当前设备冷机真机门禁（结果：FAIL，kernel UBSAN reboot）
 - [x] 完成重启后无 root/无 daemon 复核（结果：普通 shell，临时 su 不可用）
 
-### 批次 F 真机结论
+## 批次 G：恢复历史成功构建输入（2026-10-09）
+
+批次 F 的失败不只来自进程停止时机。设备上仍保留着一次真正成功的
+`/data/local/tmp/preload-app.so`。它与仓库 `ccd3b62` 的 preloader 源码、
+Android NDK r27（Clang 18.0.1）重建结果逐字节一致：91720 字节，
+SHA-256 `CCB15ABD51BB1B1122FF8E916CBE9DB89D3DC6BB162E8111335ED7B02B8FD4EE`。
+同一内核、shell UID 2000、`shift=14` 的日志记录了 uid 0、临时 `su` 和
+停止 `ExSystemService`。因此批次 G 恢复这组源码和编译器输入，而不是
+继续尝试新版 Clang 或第二个 `LD_PRELOAD` guard。
+
+- `tools/opd2515_preload/` 回到历史 standalone preloader；anti-root 停止
+  逻辑仍在同一个库内，执行时只设置 `LD_PRELOAD=preloader`。
+- Gradle 接受 `OPD2515_NDK_ROOT`，CI 下载并固定 Android NDK
+  `27.0.12077973`；普通 GhostLock native 目标仍使用 ONDK r30.1。
+- Shizuku UserService 保留 shell UID、Seccomp=0、精确 model/release 门禁，
+  继续做 root daemon 和 anti-root postflight 核验。
+- 本批次的 APK 只有在新设备门禁完成后才算 PASS；历史成功日志不能替代
+  当前安装包的 uid 0、30 秒稳定性和重启后无 root 复核。
+
+### 批次 F 真机结论（历史）
 
 本批次证明了入口隔离和日志链路，但没有证明提权成功。Shizuku
 UserService 的 `uid=2000` / `Seccomp=0` 门禁通过，两个 arm64 库的 hash
 也与 APK 一致；首次执行在 `slide requeue` 后触发
 `kernel_panic,ubsan:_array_index_out_of_bounds:_fatal_exception`，设备重启，
-没有 `uid=0` 或 `su` daemon。应用层已把该 exact profile 标为 fail-closed，
-在没有新的离线布局审查和完整真机门禁之前不再运行这条路径。
+没有 `uid=0` 或 `su` daemon。当时应用层把该 exact profile 标为
+fail-closed；Batch G 已完成离线布局审查，重新选用历史 standalone 输入，
+但仍需新的 APK 真机门禁才能改写为 PASS。

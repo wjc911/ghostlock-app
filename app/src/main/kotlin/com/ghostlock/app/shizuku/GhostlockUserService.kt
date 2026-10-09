@@ -170,30 +170,19 @@ class GhostlockUserService(private val context: Context) : IGhostlockUserService
                     context.applicationInfo.nativeLibraryDir,
                     "libopd2515_preload.so",
                 )
-                val guardSource = File(
-                    context.applicationInfo.nativeLibraryDir,
-                    "libopd2515_root_guard.so",
-                )
                 require(source.isFile) { "missing OPD2515 preloader: ${source.absolutePath}" }
-                require(guardSource.isFile) {
-                    "missing OPD2515 root guard: ${guardSource.absolutePath}"
-                }
                 val workDir = File("/data/local/tmp/ghostlock-app").apply {
                     require(isDirectory || mkdirs()) { "cannot create $absolutePath" }
                 }
                 val staged = File(workDir, "libopd2515_preload.so")
-                val stagedGuard = File(workDir, "libopd2515_root_guard.so")
                 source.copyTo(staged, overwrite = true)
-                guardSource.copyTo(stagedGuard, overwrite = true)
                 staged.setReadable(true, false)
                 staged.setExecutable(true, false)
-                stagedGuard.setReadable(true, false)
-                stagedGuard.setExecutable(true, false)
                 val nativeLog = File(workDir, ".ghostlock-opd2515-preloader.log")
                 callback.onLog(
                     "<s> OPD2515 preloader ready: uid=${Process.myUid()} Seccomp=0 " +
-                        "preloader=${staged.absolutePath} guard=${stagedGuard.absolutePath} " +
-                        "preloaderSha256=${sha256(staged)} guardSha256=${sha256(stagedGuard)} " +
+                        "preloader=${staged.absolutePath} " +
+                        "preloaderSha256=${sha256(staged)} " +
                         "debugDir=${debugDir ?: "none"}",
                 )
 
@@ -202,10 +191,12 @@ class GhostlockUserService(private val context: Context) : IGhostlockUserService
                     .redirectErrorStream(true)
                     .redirectOutput(nativeLog)
                     .apply {
-                        // The guard is first so its fork interposer observes
-                        // the preloader's first root-context fork.
-                        environment()["LD_PRELOAD"] =
-                            "${stagedGuard.absolutePath}:${staged.absolutePath}"
+                        // This is the historical, standalone preloader.  Its
+                        // anti-root stop is intentionally compiled into the
+                        // same library because splitting it into a second
+                        // LD_PRELOAD changed the timing/layout and caused a
+                        // kernel UBSAN reboot on this exact device.
+                        environment()["LD_PRELOAD"] = staged.absolutePath
                         environment()["GHOSTLOCK_HOME"] = workDir.absolutePath
                         environment()["TMPDIR"] = workDir.absolutePath
                         environment()["HOME"] = workDir.absolutePath

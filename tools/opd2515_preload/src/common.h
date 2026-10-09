@@ -154,6 +154,7 @@ extern uint64_t kaslr_slide;
 
 int run_exploit(int argc, char **argv);
 int install_embedded_su(pid_t *daemon_pid);
+int stop_oplus_exsystemservice(void);
 int init_direct_root_cpu(void);
 int restore_initial_affinity(void);
 void read_first_line(const char *path, char *buf, size_t len);

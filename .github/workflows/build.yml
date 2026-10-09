@@ -17,6 +17,7 @@ concurrency:
 
 env:
   ONDK_VERSION: "r30.1"
+  OPD2515_NDK_VERSION: "27.0.12077973"
 
 jobs:
   build-apk:
@@ -70,6 +71,21 @@ jobs:
           curl -fL "$url" -o "${{ runner.temp }}/ondk.tar.xz"
           tar -C "${{ runner.temp }}/ondk" --strip-components=1 -xf "${{ runner.temp }}/ondk.tar.xz"
 
+      - name: Cache OPD2515 NDK r27
+        id: opd2515-ndk-cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/opd2515-ndk
+          key: opd2515-ndk-${{ env.OPD2515_NDK_VERSION }}-linux
+
+      - name: Download OPD2515 NDK r27
+        if: steps.opd2515-ndk-cache.outputs.cache-hit != 'true'
+        run: |
+          url="https://dl.google.com/android/repository/android-ndk-r27-linux.zip"
+          mkdir -p "${{ runner.temp }}/opd2515-ndk"
+          curl -fL "$url" -o "${{ runner.temp }}/opd2515-ndk.zip"
+          unzip -q "${{ runner.temp }}/opd2515-ndk.zip" -d "${{ runner.temp }}/opd2515-ndk"
+
       - name: Link ONDK Rust toolchain
         run: rustup toolchain link ondk "${{ runner.temp }}/ondk/toolchains/rust"
 
@@ -93,11 +109,12 @@ jobs:
           export ONDK_HOME="${{ runner.temp }}/ondk"
           export ANDROID_NDK_HOME="$ONDK_HOME"
           export NDK_ROOT="$ONDK_HOME"
+          export OPD2515_NDK_ROOT="${{ runner.temp }}/opd2515-ndk/android-ndk-r27"
           export KEYSTORE_PATH="../keystore.jks"
           export KEYSTORE_PASS="${{ secrets.KEY_STORE_PASSWORD }}"
           export KEY_ALIAS="${{ secrets.ALIAS }}"
           export KEY_PASSWORD="${{ secrets.KEY_PASSWORD }}"
-          ./gradlew :app:assembleRelease -PforkApplicationId=com.ghostlock.opd2515.shizuku --no-daemon
+          ./gradlew :app:assembleRelease -PforkApplicationId=com.ghostlock.opd2515.legacy --no-daemon
 
       - name: Strip Ghostlock binary
         run: |

@@ -44,6 +44,15 @@ private fun resolveNdkDir(): String {
     throw GradleException("NDK not found; set ANDROID_NDK_HOME or ndk.dir in local.properties")
 }
 
+/* The OPD2515 result-set preloader is timing-sensitive.  Its only device
+ * success was built with the Android NDK r27 toolchain (Clang 18.0.1), so it
+ * must not silently inherit the newer ONDK used by the general GhostLock
+ * native targets.  CI supplies OPD2515_NDK_ROOT; local builds may point the
+ * same variable at an r27 installation. */
+private fun resolveOpd2515NdkDir(): String =
+    System.getenv("OPD2515_NDK_ROOT")?.takeIf(String::isNotBlank)
+        ?: resolveNdkDir()
+
 private data class NdkTools(val clang: String, val ar: String)
 
 private fun resolveCargoExecutable(): String {
@@ -128,7 +137,7 @@ tasks.register<Copy>("prepareGhostlockJniLibs") {
 
 tasks.register<Exec>("buildOpd2515Preload") {
     description = "buildOpd2515Preload"
-    val ndk = resolveNdkDir()
+    val ndk = resolveOpd2515NdkDir()
     workingDir(file("tools/opd2515_preload"))
     commandLine(
         "make", "clean", "all",
@@ -143,7 +152,6 @@ tasks.register<Exec>("buildOpd2515Preload") {
         file("tools/opd2515_preload/Makefile"),
     )
     outputs.file(file("tools/opd2515_preload/build/bin/preload.so"))
-    outputs.file(file("tools/opd2515_preload/build/bin/root_guard.so"))
 }
 
 tasks.register<Copy>("prepareOpd2515PreloadJniLibs") {
@@ -152,14 +160,6 @@ tasks.register<Copy>("prepareOpd2515PreloadJniLibs") {
     from("tools/opd2515_preload/build/bin/preload.so")
     into("app/src/main/jniLibs/arm64-v8a")
     rename { "libopd2515_preload.so" }
-}
-
-tasks.register<Copy>("prepareOpd2515GuardJniLibs") {
-    description = "prepareOpd2515GuardJniLibs"
-    dependsOn("buildOpd2515Preload")
-    from("tools/opd2515_preload/build/bin/root_guard.so")
-    into("app/src/main/jniLibs/arm64-v8a")
-    rename { "libopd2515_root_guard.so" }
 }
 
 tasks.register<Exec>("buildGhostlockExtract") {

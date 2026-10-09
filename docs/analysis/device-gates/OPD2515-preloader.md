@@ -7,9 +7,9 @@ mistaken for a supported route.
 
 ## Required evidence for a PASS
 
-1. APK package and both arm64 JNI libraries are identified by SHA-256.
+1. APK package and the arm64 standalone preloader are identified by SHA-256.
 2. Shizuku UserService reports `uid=2000` and `Seccomp=0` before launch.
-3. The process is started with `LD_PRELOAD=guard:preloader`; the exact target
+3. The process is started with `LD_PRELOAD=preloader`; the exact target
    release and model gate is visible in the app log.
 4. The app reports `su -c id` as uid 0 and the anti-root postflight exits 0.
 5. The device stays up for at least 30 seconds after the run.
@@ -44,6 +44,18 @@ mistaken for a supported route.
 - Safety action: the exact OPD2515 profile is now fail-closed in the app until
   a new offline-reviewed preloader passes this gate. No shift variants,
   repeated direct route, or automatic retry is allowed.
+
+## 2026-10-09 — Batch G historical standalone rebuild
+
+The historical device success was reproduced on the host from the `ccd3b62`
+preloader sources with Android NDK `27.0.12077973` / Clang 18.0.1. The result
+is byte-identical to the device's `preload-app.so` (91720 bytes,
+`CCB15ABD51BB1B1122FF8E916CBE9DB89D3DC6BB162E8111335ED7B02B8FD4EE`). The
+candidate APK must package that source-built library and load it alone; the
+newer Clang build and split `guard:preloader` route are excluded after the
+UBSAN reboot. This is an offline build-evidence record, not yet a current-device
+PASS: the cold-start gate still requires uid 0, 30-second stability, and the
+post-reboot no-root checks above.
 
 ## Run record template
 
