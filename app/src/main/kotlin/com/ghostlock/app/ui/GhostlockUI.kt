@@ -706,24 +706,30 @@ private fun ControlPanel(
             )
             /* PROFILE-SUGGEST-01: the profile suggestion seeds the toggle but no
              * longer hides it; an explicit user choice overrides either way. */
-            SwitchPreference(
-                checked = state.shizukuEnabled,
-                onCheckedChange = actions::onShizukuChanged,
-                title = stringResource(R.string.shizuku_label),
-                summary = stringResource(
-                    when {
-                        !state.shizukuEnabled -> R.string.shizuku_summary
-                        state.shizukuStatus == ShizukuStatus.READY -> R.string.shizuku_status_ready
-                        state.shizukuStatus == ShizukuStatus.PERMISSION_REQUIRED ->
-                            R.string.shizuku_status_permission_required
+            /* A fail-closed exact target has no executable Shizuku route.  Do
+             * not leave a stale switch on screen that suggests otherwise;
+             * supported profiles still retain the normal user-controlled
+             * switch, including after an explicit off choice. */
+            if (state.kernelSupported || state.shizukuEnabled) {
+                SwitchPreference(
+                    checked = state.shizukuEnabled,
+                    onCheckedChange = actions::onShizukuChanged,
+                    title = stringResource(R.string.shizuku_label),
+                    summary = stringResource(
+                        when {
+                            !state.shizukuEnabled -> R.string.shizuku_summary
+                            state.shizukuStatus == ShizukuStatus.READY -> R.string.shizuku_status_ready
+                            state.shizukuStatus == ShizukuStatus.PERMISSION_REQUIRED ->
+                                R.string.shizuku_status_permission_required
 
-                        state.shizukuStatus == ShizukuStatus.NOT_RUNNING ->
-                            R.string.shizuku_status_not_running
+                            state.shizukuStatus == ShizukuStatus.NOT_RUNNING ->
+                                R.string.shizuku_status_not_running
 
-                        else -> R.string.shizuku_status_checking
-                    },
-                ),
-            )
+                            else -> R.string.shizuku_status_checking
+                        },
+                    ),
+                )
+            }
         }
         Card(modifier = modifier.padding(top = 12.dp)) {
             ArrowPreference(
