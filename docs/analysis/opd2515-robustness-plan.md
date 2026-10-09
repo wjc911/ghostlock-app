@@ -83,6 +83,6 @@ new kernel exploit variant are introduced in this batch.
 ## Progress
 
 - [x] Record baseline and failure evidence.
-- [ ] Add Kotlin guards.
+- [x] Add Kotlin guards.
 - [ ] Run host/CI verification.
 - [ ] Install without executing on the current panic boot.
