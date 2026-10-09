@@ -681,7 +681,7 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
             val nativeBytes = runCatching { nativeLog.readBytes() }.getOrDefault(ByteArray(0))
             if (nativeBytes.isNotEmpty()) {
                 writeSidecar("opd2515-direct-preloader.log", nativeBytes)
-                nativeBytes.toString(StandardCharsets.UTF_8)
+                String(nativeBytes, StandardCharsets.UTF_8)
                     .lineSequence()
                     .filter { it.isNotBlank() }
                     .forEach(onLog)
