@@ -172,8 +172,66 @@ Shizuku 选项处于开启状态，而 `GhostlockUserService` 固定启动通用
 先前“shift=14 必然落在 futex_q、应改为 28”的静态假设已撤回，不能再用
 它指导变体试验。
 
-为防止用户误把通用 Shizuku 路径再次运行，应用层对精确 OPD2515 现在会
-拒绝 Shizuku 入口；默认 profile 也不再自动勾选 Shizuku。直接入口仍然
-只在型号、内核 release、`result_stack` profile 和专用 preloader 同时匹配
-时选择，下一次真机测试前仍需保留完整启动证据，并把任何 panic/reboot
-记为失败，不自动尝试 shift 变体。
+为防止用户误把通用 Shizuku 路径再次运行，上一版应用层曾对精确 OPD2515
+拒绝 Shizuku 入口，并关闭默认推荐。该入口隔离只适用于旧的通用
+`libghostlock.so` 路径；批次 E 改为显式选择 shell UID 专用 preloader。
+应用 UID direct 入口仍必须拒绝，下一次真机测试前仍需保留完整启动证据，
+并把任何 panic/reboot 记为失败，不自动尝试 shift 变体。
+
+## 2026-10-09 11:19 直接 preloader 复测失败
+
+在密码已关闭、Shizuku 明确关闭的条件下，应用日志
+`Download/ghostlock-debug-log/20261009-111901/ghostlock-direct-0.log`
+确认本次确实进入了 OPD2515 专用 `libopd2515_preload.so`，而不是通用
+`libghostlock.so`。日志显示：
+
+- `shift=14` 的 KASLR 泄漏阶段完成，`slide-kaslr-ok` 成功；
+- `per_cpu_offset`、`entry_task` 两次读回通过；
+- 读取 `selinux_enforcing` 得到 `raw=0100000101010101`，不是合法的 0/1，
+  但代码随后按“无法读取则假定 enforcing=1”继续；
+- 在第一次真实内核写入 `install_real_cred`（`direct-w64[3]`）之后日志
+  截断，设备自动重启。
+
+重启后 `ro.boot.bootreason` 为
+`kernel_panic,ubsan:_array_index_out_of_bounds:_fatal_exception`，普通
+shell 仍为 uid 2000，`/sys/fs/pstore` 没有可读的内核 console/ramoops
+调用栈。因此，之前 `/data/local/tmp/preload.out` 中一次成功的旧日志不能
+作为稳定性证据；本次结果把直接 preloader 也定为 FAIL。当前不能再运行
+任何 shift 变体、通用 Shizuku 路径或重复 direct 路径，必须先离线修复
+result-set 读写验证和失败即停止的门禁。
+
+## 批次 E：shell UID 专用 preloader 入口（设计，2026-10-09）
+
+应用 UID 10045 的 direct 复测在第一次真实写入前已经读到非法的
+`selinux_enforcing` 值，并在 `install_real_cred` 后触发 UBSAN。旧的成功
+记录来自 shell UID 2000，且没有经过当前应用的 seccomp 环境。因此，下一批
+只研究 UID/环境差异，不再让应用进程直接加载 preloader。
+
+### 目标与约束
+
+- Shizuku UserService 只负责以 shell UID、`Seccomp=0` 启动精确的
+  `libopd2515_preload.so`；不得调用通用 `libghostlock.so`。
+- 精确 OPD2515 的应用 UID direct 入口必须早拒绝；不能让用户误触发已失败
+  的路径。
+- 不改变其他设备的 route、profile 或 Shizuku 行为；不写分区，不解锁 BL。
+- 任何真机测试前，必须先验证 UserService 的 UID/seccomp、二进制 hash 和
+  日志目录；panic/reboot 立即判 FAIL，不自动重试。
+
+### 改动清单
+
+| 文件 | 改动 | 理由 |
+|---|---|---|
+| `app/src/main/aidl/com/ghostlock/app/shizuku/IGhostlockUserService.aidl` | 增加专用 `runOpd2515Preloader` 调用 | 显式区分 shell preloader 与通用 native route |
+| `app/src/main/kotlin/com/ghostlock/app/shizuku/GhostlockUserService.kt` | 校验 shell UID/`Seccomp=0`，启动 APK 内精确 preloader 并转发日志 | 复现旧成功日志的执行环境，避免应用 UID seccomp |
+| `app/src/main/kotlin/com/ghostlock/app/shizuku/ShizukuExploitRunner.kt` | 增加专用 UserService 调用与连接生命周期 | 保持 Binder/回调清理边界明确 |
+| `app/src/main/kotlin/com/ghostlock/app/data/AndroidGhostlockRepository.kt` | exact OPD2515 的 direct 入口早拒绝；Shizuku 入口选择专用调用 | 防止再次触发已失败 direct 路径 |
+| `app/src/main/assets/kernel_profiles/6.12.58-...conf` | 将 `recommend_shizuku` 设为 1，并注明这是专用入口 | 新包默认走 shell UID 入口 |
+| `app/build.gradle.kts` / CI 调用 | 使用独立 fork applicationId，避免与原包签名冲突 | 不卸载现有 GhostLock，不覆盖其数据 |
+
+### 验证矩阵
+
+1. `:profile-core:test`、`:app:testDebugUnitTest` 和 CI APK 构建通过。
+2. 新 APK 独立安装后只读确认包名、APK/SO SHA-256、Shizuku 状态。
+3. 首次真机运行只允许专用 shell preloader；成功标准同时包括
+   `uid=0`、`direct-root-summary root=1`、`su` socket 和无 panic。
+4. 失败时只收集日志和 `bootreason`，不重试、不切换 shift。

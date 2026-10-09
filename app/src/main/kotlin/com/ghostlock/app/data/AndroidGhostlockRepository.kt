@@ -397,6 +397,14 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
 
     override suspend fun runExploit(pair: CpuPair, onLog: (String) -> Unit): Int =
         withDebugAttackLog("direct", onLog) { archivedLog, debugDir, writeSidecar ->
+            val release = System.getProperty("os.version", "").orEmpty()
+            if (isOpd2515Target(release)) {
+                archivedLog(
+                    "<s> error: direct app-UID route is disabled for exact OPD2515; " +
+                        "enable Shizuku to run the shell-UID preloader",
+                )
+                return@withDebugAttackLog 2
+            }
             runExploitBinary(pair, "libghostlock.so", archivedLog, debugDir, writeSidecar)
         }
 
@@ -405,11 +413,17 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
             archivedLog("<s> resolving profile")
             val release = System.getProperty("os.version", "").orEmpty()
             if (isOpd2515Target(release)) {
-                archivedLog(
-                    "<s> error: Shizuku is disabled for exact OPD2515; " +
-                        "use the packaged preloader through the direct app route",
+                archivedLog("<b> exact OPD2515: selecting shell-UID preloader via Shizuku")
+                resetRunState()
+                return@withDebugAttackLog shizukuRunner.run(
+                    pair = pair,
+                    safeMode = safeModeEnabled,
+                    forceAttack = forceAttackTest,
+                    profileBlob = ByteArray(0),
+                    debugDir = debugDir,
+                    onLog = archivedLog,
+                    opd2515Preloader = true,
                 )
-                return@withDebugAttackLog 2
             }
             val config = profileController.load(release, pair)
             val profileBlob = profileController.nativeDocument(config)
@@ -443,7 +457,12 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
                     archivedLog("<b> starting UserService")
                     resetRunState()
                     shizukuRunner.run(
-                        pair, safeModeEnabled, forceAttackTest, profileBlob, debugDir, archivedLog,
+                        pair = pair,
+                        safeMode = safeModeEnabled,
+                        forceAttack = forceAttackTest,
+                        profileBlob = profileBlob,
+                        debugDir = debugDir,
+                        onLog = archivedLog,
                     ) { step, status ->
                         if (status == "disabled") clearRunState() else applyRunStatus(step, status)
                     }

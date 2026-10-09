@@ -6,4 +6,5 @@ import com.ghostlock.app.shizuku.IGhostlockStatusCallback;
 interface IGhostlockUserService {
     void destroy() = 16777114;
     void runExploit(int primaryCpu, int consumerCpu, boolean safeMode, boolean forceAttack, in byte[] profileBlob, @nullable String debugDir, IGhostlockCallback callback, IGhostlockStatusCallback statusCallback) = 2;
+    void runOpd2515Preloader(@nullable String debugDir, IGhostlockCallback callback) = 3;
 }

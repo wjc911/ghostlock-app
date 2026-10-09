@@ -137,6 +137,126 @@ class GhostlockUserService(private val context: Context) : IGhostlockUserService
         }, "ghostlock-shizuku-runner").start()
     }
 
+    /**
+     * Runs only the exact OPD2515 preloader from the shell UserService.
+     *
+     * The app-UID direct route is intentionally kept out of this method: the
+     * device's app process is seccomp-filtered, while the historical preloader
+     * evidence was collected from a shell UID with Seccomp=0. This method does
+     * not start libghostlock.so or consume a GLK profile.
+     */
+    override fun runOpd2515Preloader(
+        debugDir: String?,
+        callback: IGhostlockCallback,
+    ) {
+        if (!running.compareAndSet(false, true)) {
+            callback.onLog("<s> error: another GhostLock process is already running")
+            callback.onComplete(1)
+            return
+        }
+        Thread({
+            val exitCode = runCatching {
+                require(Process.myUid() == Process.SHELL_UID) {
+                    "OPD2515 preloader uid=${Process.myUid()}, expected ${Process.SHELL_UID}"
+                }
+                val status = File("/proc/self/status").readText()
+                require(Regex("(?m)^Seccomp:\\s*0$").containsMatchIn(status)) {
+                    "OPD2515 preloader UserService is still seccomp-filtered"
+                }
+
+                val source = File(
+                    context.applicationInfo.nativeLibraryDir,
+                    "libopd2515_preload.so",
+                )
+                require(source.isFile) { "missing OPD2515 preloader: ${source.absolutePath}" }
+                val workDir = File("/data/local/tmp/ghostlock-app").apply {
+                    require(isDirectory || mkdirs()) { "cannot create $absolutePath" }
+                }
+                val staged = File(workDir, "libopd2515_preload.so")
+                source.copyTo(staged, overwrite = true)
+                staged.setReadable(true, false)
+                staged.setExecutable(true, false)
+                val nativeLog = File(workDir, ".ghostlock-opd2515-preloader.log")
+                callback.onLog(
+                    "<s> OPD2515 preloader ready: uid=${Process.myUid()} Seccomp=0 " +
+                        "binary=${staged.absolutePath} debugDir=${debugDir ?: "none"}",
+                )
+
+                ProcessBuilder("/system/bin/id")
+                    .directory(workDir)
+                    .redirectErrorStream(true)
+                    .redirectOutput(nativeLog)
+                    .apply {
+                        environment()["LD_PRELOAD"] = staged.absolutePath
+                        environment()["GHOSTLOCK_HOME"] = workDir.absolutePath
+                        environment()["TMPDIR"] = workDir.absolutePath
+                        environment()["HOME"] = workDir.absolutePath
+                        environment()["GHOSTLOCK_CLIENT_UID"] = Process.myUid().toString()
+                    }
+                    .start()
+                    .let { process ->
+                        val tailer = Thread({
+                            relayLogSimple(nativeLog, callback)
+                        }, "ghostlock-opd2515-preloader-tailer").apply {
+                            isDaemon = true
+                            start()
+                        }
+                        val code = process.waitFor()
+                        callback.onLog("<b> OPD2515 preloader exited code=$code")
+                        tailer.interrupt()
+                        tailer.join(1000)
+                        code
+                    }
+            }.getOrElse { error ->
+                runCatching { callback.onLog("<s> error: ${error.message}") }
+                1
+            }
+            running.set(false)
+            runCatching { callback.onComplete(exitCode) }
+        }, "ghostlock-opd2515-preloader").start()
+    }
+
+    private fun relayLogSimple(logFile: File, callback: IGhostlockCallback) {
+        var offset = 0L
+        val pending = StringBuilder()
+        while (!Thread.currentThread().isInterrupted) {
+            try {
+                if (logFile.isFile) {
+                    RandomAccessFile(logFile, "r").use { handle ->
+                        if (offset > handle.length()) {
+                            offset = 0
+                            pending.clear()
+                        }
+                        handle.seek(offset)
+                        while (true) {
+                            val byte = handle.read()
+                            if (byte == -1) break
+                            if (byte == '\\n'.code) {
+                                val line = pending.toString()
+                                pending.clear()
+                                offset = handle.filePointer
+                                if (line.isNotEmpty()) runCatching { callback.onLog(line) }
+                            } else {
+                                pending.append(byte.toChar())
+                            }
+                        }
+                    }
+                }
+                Thread.sleep(100)
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+                return
+            } catch (_: Exception) {
+                try {
+                    Thread.sleep(200)
+                } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    return
+                }
+            }
+        }
+    }
+
     /** Forward complete native log lines without ever blocking the native
      * process; the file is the transport, binder is only the display path. */
     /** Forwards status events to the app (persist) and ACKs the native process;
