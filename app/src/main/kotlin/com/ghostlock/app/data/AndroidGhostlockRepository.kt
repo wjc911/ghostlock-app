@@ -404,6 +404,13 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
         return withDebugAttackLog("shizuku", onLog) { archivedLog, debugDir, writeSidecar ->
             archivedLog("<s> resolving profile")
             val release = System.getProperty("os.version", "").orEmpty()
+            if (isOpd2515Target(release)) {
+                archivedLog(
+                    "<s> error: Shizuku is disabled for exact OPD2515; " +
+                        "use the packaged preloader through the direct app route",
+                )
+                return@withDebugAttackLog 2
+            }
             val config = profileController.load(release, pair)
             val profileBlob = profileController.nativeDocument(config)
             archivedLog(
@@ -703,13 +710,16 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
      */
     private fun shouldUseOpd2515Preloader(release: String, config: ProfileConfig): Boolean {
         if (release != Opd2515Release || config.route != "result_stack") return false
-        val model = Build.MODEL.trim()
-        if (model != "OPD2515") return false
+        if (!isOpd2515Target(release)) return false
         return File(
             appContext.applicationInfo.nativeLibraryDir,
             Opd2515PreloadBinaryName,
         ).isFile
     }
+
+    /** Exact target gate shared by the preloader selector and Shizuku guard. */
+    private fun isOpd2515Target(release: String): Boolean =
+        release == Opd2515Release && Build.MODEL.trim() == "OPD2515"
 
     /** Runs the exact OPD2515 temporary-root preloader from the app UID. */
     private suspend fun runOpd2515Preloader(onLog: (String) -> Unit): Int {
