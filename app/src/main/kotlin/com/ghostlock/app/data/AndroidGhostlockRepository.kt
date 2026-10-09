@@ -731,12 +731,12 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
                     .forEach(onLog)
             }
             onLog("<b> OPD2515 direct preloader exited code=$code")
-            /* The /system/bin/id process itself normally exits 0 even when a
+            /* The shell wrapper itself normally exits 0 even when a
              * constructor payload failed.  Conversely, an SELinux denial can
              * prevent the app process from executing /data/local/tmp/su even
              * after the native payload has installed a working daemon.  Use
-             * the native root summary as the primary handoff proof and keep
-             * the Java postflight best-effort. */
+             * the native root summary plus the root-side broker marker as the
+             * handoff proof. */
             val brokerDeadline = System.currentTimeMillis() + 5_000L
             while (!ready.isFile && System.currentTimeMillis() < brokerDeadline) {
                 Thread.sleep(100L)

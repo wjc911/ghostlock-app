@@ -147,7 +147,7 @@ jobs:
                   f'unknown OPD2515 preloader size/hash: {len(data)} {digest}'
               )
           if x9u_digest != '32AC2F03F56955C41032157AA53F23590C3F6A1595FCCC025AD991322E07F7F6' \
-                  or len(x9u) != 91720:
+                  or len(x9u) != 89136:
               raise SystemExit(
                   f'unknown validated X9U preloader size/hash: {len(x9u)} {x9u_digest}'
               )

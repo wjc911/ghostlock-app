@@ -81,7 +81,7 @@ root 与 `su` daemon 本身是易失状态，重启后消失。源码回滚只�
 - 不改 `src/` 的通用 native route、profile wire 或 kernelsnitch；
 - 不改变原有 `ShizukuExploitRunner` 的 shell-UID 代码；
 - 同时保留 NDK r27 重建的 OPD preloader，并单独封存一份公开项目在同一 kernel
-  字符串上已验证过的 `libx9upreload.so`（91720 bytes，SHA-256 固定）；实验 APK
+  字符串上已验证过的 `libx9upreload.so`（89,136 bytes，SHA-256 固定）；实验 APK
   优先使用后者，不能将其当成 OPD2515 已完成真机验证；
 - 不执行分区写入、GBL chainload 或 bootloader 解锁。
 
@@ -112,7 +112,7 @@ Java 侧不再把 `/data/local/tmp/su` 的 `execute`/`connectto` 权限当成必
 - [x] 增加 opt-in App-UID Android 入口与 per-boot fail-closed guard
 - [x] CI 编译实验 APK（`37960284218`，preloader hash 验收通过）
 - [x] 实验分支额外上传保持 APK 容器完整的安装包
-- [x] 封存并核验同 kernel 的公开 X9U App-UID preloader（91720 bytes）
+- [x] 封存并核验同 kernel 的公开 X9U App-UID preloader（89,136 bytes）
 - [x] 将启动形状改为 `sh -c` + root-side broker，并把 anti-root stop 移到 root 侧
 - [ ] 平板冷启动真机门禁
 - [ ] 重启后再次激活门禁
