@@ -64,7 +64,11 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
         const val Opd2515X9uOpdRebuiltPreloaderHash =
             "A4EBA1AE0AB3A9F420DC9B75181F70B49FF725192CF0933F15E36A0861511519"
         const val Opd2515Model = "OPD2515"
-        const val Opd2515PreloaderTimeoutMs = 30_000L
+        /* The validated X9U App-UID runner allows a long native window.  Keep
+         * the OPD port similarly generous: this is a one-shot-per-boot
+         * operation, so killing a still-progressing race at 30 seconds is
+         * worse than waiting. */
+        const val Opd2515PreloaderTimeoutMs = 120_000L
         const val Opd2515DirectReadyName = ".opd2515-direct-root-ready"
         /* This is deliberately a build-time opt-in.  The normal fork remains
          * fail-closed until the exact device route has a fresh cold-boot
