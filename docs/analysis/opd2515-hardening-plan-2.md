@@ -39,3 +39,14 @@ model/kernel/SELinux gates, and postflight probe remain unchanged.
 - Record the no-ADB reboot boundary separately: Android/ColorOS may run
   Shizuku's boot receiver before Wi-Fi is ready, so this batch does not claim
   automatic post-reboot shell access.
+
+## Device observation — 2026-10-09
+
+On OPPO Pad Mini (`OPD2515`, `6.12.58-android16-6-g7704a1ae279b-ab15213644-4k`),
+the package survived a clean reboot, but `adb_wifi_enabled` returned to `0`
+and `pidof shizuku_server` was empty after Wi-Fi had reconnected. Starting the
+Shizuku server manually restored the app to `Shizuku 已就绪`. This is an
+Android/ColorOS privilege and boot-order boundary, not an app crash; the APK
+cannot create a shell-UID process or send a protected boot broadcast after a
+reboot. The release therefore keeps the automatic path fail-closed and makes
+the one-time Shizuku prerequisite visible in the UI.
