@@ -25,7 +25,7 @@ route is stable.
 
 | File | Change | Reason |
 | --- | --- | --- |
-| `app/src/main/kotlin/com/ghostlock/app/shizuku/GhostlockUserService.kt` | Add boot ID / bootreason preflight, per-boot marker, stale `su` probe, and explicit logs. | Reject known panic/reboot states and duplicate attempts before starting the native process. |
+| `app/src/main/kotlin/com/ghostlock/app/shizuku/GhostlockUserService.kt` | Add exact model/kernel/SELinux and known-SHA preflight, boot ID / bootreason checks, per-boot marker, stale `su` probe, and explicit logs. | Reject wrong execution environments, unknown payloads, unsafe boot states, and duplicate attempts before starting the native process. |
 | `app/src/main/kotlin/com/ghostlock/app/shizuku/ShizukuExploitRunner.kt` | Do not retry a preloader UserService connection. | A reconnect can otherwise launch the high-risk route more than once after a partial failure. |
 | `docs/analysis/device-gates/OPD2515-preloader.md` | Record the repeat panic and the new safety boundaries. | Keep PASS and FAIL evidence together and prevent the old one-run PASS from being overstated. |
 | `docs/analysis/opd2515-support-plan.md` | Add the robustness batch and the no-ADB limitation. | Make the operational contract discoverable. |
@@ -34,17 +34,19 @@ route is stable.
 
 ```mermaid
 flowchart TD
-    A[Shizuku shell UserService] --> B[check uid=2000 and Seccomp=0]
-    B --> C[read boot_id and ro.boot.bootreason]
-    C -->|panic or malicious reboot| X[fail closed; no native launch]
-    C --> D[read per-boot marker]
-    D -->|same boot already attempted| X
-    D --> E[probe existing su for active root]
-    E -->|already uid 0| X2[report active root; no rerun]
-    E --> F[write marker before staging]
-    F --> G[stage unchanged preloader]
-    G --> H[one native launch]
-    H --> I[postflight probe]
+    A[Shizuku shell UserService] --> B[check uid/model/kernel/SELinux]
+    B --> C[check known preloader SHA]
+    C -->|mismatch| X[fail closed; no native launch]
+    C --> D[read boot_id and ro.boot.bootreason]
+    D -->|panic or malicious reboot| X
+    D --> E[read per-boot marker]
+    E -->|same boot already attempted| X
+    E --> F[probe existing su for active root]
+    F -->|already uid 0| X2[report active root; no rerun]
+    F --> G[write marker before staging]
+    G --> H[stage unchanged preloader]
+    H --> I[one native launch]
+    I --> J[postflight probe]
 ```
 
 The marker is written before the native process starts and is keyed to

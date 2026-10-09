@@ -99,12 +99,15 @@ reboot: the anti-root reboot string was absent and the reboot reason identified
 the kernel UBSAN path. The one earlier Batch G success therefore remains a
 single-run observation and does not establish stability.
 
-The APK hardening batch adds three fail-closed controls before the native launch:
+The APK hardening batch adds four fail-closed controls before the native launch:
 
-1. Reject `kernel_panic` and `malicious_app_try_to_root_devices` boot reasons.
-2. Write `/data/local/tmp/ghostlock-app/.opd2515-boot-id` before starting the
+1. Reject a model/kernel/SELinux context outside the exact validated target and
+   reject any preloader SHA other than `01C7FE7F...7A4441C` or the historical
+   standalone `CCB15ABD...B8FD4EE`.
+2. Reject `kernel_panic` and `malicious_app_try_to_root_devices` boot reasons.
+3. Write `/data/local/tmp/ghostlock-app/.opd2515-boot-id` before starting the
    preloader, and refuse a second attempt with the same kernel boot ID.
-3. Probe an existing `/data/local/tmp/su`; report an already-active temporary
+4. Probe an existing `/data/local/tmp/su`; report an already-active temporary
    root without launching another exploit, and label an unusable file as stale.
 
 The Shizuku runner also uses one connection attempt for this preloader instead

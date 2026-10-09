@@ -1,6 +1,7 @@
 package com.ghostlock.app.shizuku
 
 import android.content.Context
+import android.os.Build
 import android.os.Process
 import androidx.annotation.Keep
 import com.ghostlock.app.data.NativeProfileDocument
@@ -20,6 +21,13 @@ class GhostlockUserService(private val context: Context) : IGhostlockUserService
         const val StatusDisabled = "\u001eGLK_STATUS_DISABLED"
         const val Opd2515WorkDir = "/data/local/tmp/ghostlock-app"
         const val Opd2515BootMarkerName = ".opd2515-boot-id"
+        const val Opd2515Model = "OPD2515"
+        const val Opd2515Release =
+            "6.12.58-android16-6-g7704a1ae279b-ab15213644-4k"
+        const val Opd2515PreloaderHash91424 =
+            "01C7FE7FEAF5DB79AA239CF76CA7C0DDB909BE9747FCCFAF794A9420D7A4441C"
+        const val Opd2515PreloaderHash91720 =
+            "CCB15ABD51BB1B1122FF8E916CBE9DB89D3DC6BB162E8111335ED7B02B8FD4EE"
     }
 
     override fun runExploit(
@@ -167,12 +175,27 @@ class GhostlockUserService(private val context: Context) : IGhostlockUserService
                 require(Regex("(?m)^Seccomp:\\s*0$").containsMatchIn(status)) {
                     "OPD2515 preloader UserService is still seccomp-filtered"
                 }
+                require(Build.MODEL.trim() == Opd2515Model) {
+                    "OPD2515 preloader model gate failed: ${Build.MODEL}"
+                }
+                val kernelRelease = System.getProperty("os.version", "").trim()
+                require(kernelRelease == Opd2515Release) {
+                    "OPD2515 preloader kernel gate failed: $kernelRelease"
+                }
+                val selinuxContext = File("/proc/self/attr/current").readText().trim()
+                require(selinuxContext == "u:r:shell:s0") {
+                    "OPD2515 preloader SELinux gate failed: $selinuxContext"
+                }
 
                 val source = File(
                     context.applicationInfo.nativeLibraryDir,
                     "libopd2515_preload.so",
                 )
                 require(source.isFile) { "missing OPD2515 preloader: ${source.absolutePath}" }
+                val sourceHash = sha256(source).uppercase()
+                require(isKnownOpd2515PreloaderHash(sourceHash)) {
+                    "unrecognized OPD2515 preloader SHA-256: $sourceHash"
+                }
                 val workDir = File(Opd2515WorkDir).apply {
                     require(isDirectory || mkdirs()) { "cannot create $absolutePath" }
                 }
@@ -226,11 +249,14 @@ class GhostlockUserService(private val context: Context) : IGhostlockUserService
                 source.copyTo(staged, overwrite = true)
                 staged.setReadable(true, false)
                 staged.setExecutable(true, false)
+                require(sha256(staged).uppercase() == sourceHash) {
+                    "staged OPD2515 preloader hash changed during copy"
+                }
                 val nativeLog = File(workDir, ".ghostlock-opd2515-preloader.log")
                 callback.onLog(
                     "<s> OPD2515 preloader ready: uid=${Process.myUid()} Seccomp=0 " +
-                        "preloader=${staged.absolutePath} " +
-                        "preloaderSha256=${sha256(staged)} " +
+                        "selinux=$selinuxContext preloader=${staged.absolutePath} " +
+                        "preloaderSha256=$sourceHash " +
                         "debugDir=${debugDir ?: "none"}",
                 )
 
@@ -306,6 +332,9 @@ class GhostlockUserService(private val context: Context) : IGhostlockUserService
     private fun isUnsafeBootReason(reason: String): Boolean =
         reason.contains("kernel_panic", ignoreCase = true) ||
             reason.contains("malicious_app_try_to_root_devices", ignoreCase = true)
+
+    private fun isKnownOpd2515PreloaderHash(hash: String): Boolean =
+        hash == Opd2515PreloaderHash91424 || hash == Opd2515PreloaderHash91720
 
     /**
      * Complete the volatile handoff after the preloader process exits.  The
