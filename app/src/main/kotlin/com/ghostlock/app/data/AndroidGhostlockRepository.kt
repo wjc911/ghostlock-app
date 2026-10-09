@@ -464,14 +464,12 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
             archivedLog("<s> resolving profile")
             val release = System.getProperty("os.version", "").orEmpty()
             if (isOpd2515Target(release)) {
-                if (Opd2515DirectExperimental) {
-                    archivedLog("<s> exact OPD2515 experimental build: forcing App-UID preload")
-                    return@withDebugAttackLog runOpd2515DirectPreloader(
-                        archivedLog,
-                        debugDir,
-                        writeSidecar,
-                    )
-                }
+                /* Keep the proven shell-UID route independent from the
+                 * ordinary-App experiment.  The experiment is selected by
+                 * runExploit() only; a Shizuku invocation must continue to
+                 * use UserService (uid=2000, Seccomp=0), because the historic
+                 * OPD2515 success and the direct-App path have different
+                 * kernel-side timing and postflight requirements. */
                 if (!Opd2515PreloaderValidated) {
                     archivedLog(
                         "<s> error: exact OPD2515 preloader is disabled after " +
@@ -817,7 +815,7 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
             return false
         }
         val stopCommand =
-            "for name in exsystemservice com.oplus.exsystemservice oplus_kevent; " +
+            "for name in exsystemservice com.oplus.exsystemservice; " +
                 "do for pid in \$(pidof \$name 2>/dev/null); do kill -STOP \$pid; " +
                 "done; done"
         val stop = runOpd2515RootCommand(su, stopCommand)
