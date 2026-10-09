@@ -47,13 +47,14 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
         const val Opd2515Release =
             "6.12.58-android16-6-g7704a1ae279b-ab15213644-4k"
         /*
-         * The exact-device gate uses the historical standalone preloader:
-         * source tree ccd3b62 + Android NDK r27/Clang 18.0.1.  That source
-         * rebuild is byte-identical to the device binary that previously
-         * reached uid=0 and installed the temporary su daemon.  The newer
-         * Clang/relocated guard build is deliberately not selected here.
+         * The exact-device preloader once reached uid=0, but a repeat run on
+         * the same OPD2515 reached the kernel UBSAN path and rebooted before
+         * handoff.  A single historical success is not a stability gate.
+         * Keep this false until a new offline-reviewed payload passes the
+         * cold-boot, 30-second, and post-reboot checks documented in
+         * docs/analysis/device-gates/OPD2515-preloader.md.
          */
-        const val Opd2515PreloaderValidated = true
+        const val Opd2515PreloaderValidated = false
         const val DefaultDebugLocation = "Download/ghostlock-debug-log"
         const val PrefForceAttackTest = "force_attack_test"
         const val PrefDebugExportEnabled = "debug_export_enabled"
