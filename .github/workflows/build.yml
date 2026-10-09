@@ -97,7 +97,7 @@ jobs:
           export KEYSTORE_PASS="${{ secrets.KEY_STORE_PASSWORD }}"
           export KEY_ALIAS="${{ secrets.ALIAS }}"
           export KEY_PASSWORD="${{ secrets.KEY_PASSWORD }}"
-          ./gradlew :app:assembleRelease -PforkApplicationId=com.ghostlock.opd2515 --no-daemon
+          ./gradlew :app:assembleRelease -PforkApplicationId=com.ghostlock.opd2515.shizuku --no-daemon
 
       - name: Strip Ghostlock binary
         run: |
