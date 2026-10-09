@@ -33,7 +33,7 @@ kernel 字符串、同一 OPPO 系列上验证普通 App UID 通过 `LD_PRELOAD`
 | 文件 | 改动 | 理由 |
 | --- | --- | --- |
 | `app/build.gradle.kts` | 增加 `OPD2515_DIRECT_EXPERIMENTAL` BuildConfig 字段 | 防止普通构建误启用高风险入口 |
-| `app/src/main/kotlin/com/ghostlock/app/data/AndroidGhostlockRepository.kt` | 增加 exact target gate、App-UID `LD_PRELOAD` 启动、每 boot marker、日志与 root postflight | 复用已验证的 X9U App-UID 入口，保持现有 UI/日志契约 |
+| `app/src/main/kotlin/com/ghostlock/app/data/AndroidGhostlockRepository.kt` | 增加 exact target gate、App-UID `LD_PRELOAD` 启动、每 boot marker、root-side broker 与日志 | 复用已验证的 X9U App-UID 启动形状，避开 Java App UID 的 SELinux postflight 限制 |
 | `.github/workflows/build.yml` | 实验分支构建时传入 opt-in property，并核验 preloader hash | 生成可审计的实验 APK |
 | `docs/analysis/device-gates/OPD2515-appuid-direct-plan.md` | 记录设计、边界与验证矩阵 | 使未验证状态可追溯 |
 
@@ -45,11 +45,11 @@ flowchart TD
     B -- fail --> R[拒绝并记录原因]
     B -- pass --> C{本 boot marker / bootreason / 已有 su}
     C -- unsafe or repeated --> R
-    C -- clean --> D[ProcessBuilder /system/bin/id\nLD_PRELOAD=libopd2515_preload.so]
+    C -- clean --> D[ProcessBuilder /system/bin/sh -c\nLD_PRELOAD=validated X9U preloader]
     D --> E[preloader: CVE-2026-43499\ncredential + SELinux handoff]
     E --> F[write /data/local/tmp/su\nstart root broker]
-    F --> G[App UID su -c id + stop known anti-root tasks]
-    G -- uid=0 --> H[temporary root ready]
+    F --> G[root-side app-private broker\nuid=0 + SIGSTOP anti-root tasks]
+    G -- ready marker --> H[temporary root ready]
     G -- fail --> R
 ```
 
@@ -80,7 +80,9 @@ root 与 `su` daemon 本身是易失状态，重启后消失。源码回滚只�
 
 - 不改 `src/` 的通用 native route、profile wire 或 kernelsnitch；
 - 不改变原有 `ShizukuExploitRunner` 的 shell-UID 代码；
-- 不使用 X9U 的预编译 payload；每个设备仍必须从自己的 boot/xbl 重新生成；
+- 同时保留 NDK r27 重建的 OPD preloader，并单独封存一份公开项目在同一 kernel
+  字符串上已验证过的 `libx9upreload.so`（91720 bytes，SHA-256 固定）；实验 APK
+  优先使用后者，不能将其当成 OPD2515 已完成真机验证；
 - 不执行分区写入、GBL chainload 或 bootloader 解锁。
 
 ## 同内核证据与实现差异
@@ -97,11 +99,11 @@ bootstrap/mini-adb 第二阶段；它们证明的是漏洞跨设备可移植性�
 “not feasible”，因此本分支只把 X9U 的 App-UID 启动方式和 OPD2515 自己的
 preloader 结合，保持实验开关，不能把公开项目的互相矛盾直接当作平板验证。
 
-实验分支的 Java 侧以 native 输出中的
-`direct-root-summary root=1 ... su=1/...` 作为主要交接证据；`/data/local/tmp/su`
-的 Java 进程执行和 anti-root 停止动作均为 best-effort，native payload 本身已在
-获得 root 后停止 `ExSystemService`。这样不会因为 untrusted_app 的 SELinux
-`execute`/`connectto` 限制，把已经成功的临时 root 报成失败。
+实验分支以 native 输出中的 `direct-root-summary root=1 ... su=1/...` 加上
+app-private broker 写出的 `root=1` marker 作为交接证据。broker 在 root shell 内
+停止 `ExSystemService`、`com.oplus.exsystemservice` 与 `oplus_kevent` 的当前进程；
+Java 侧不再把 `/data/local/tmp/su` 的 `execute`/`connectto` 权限当成必要条件。
+这样能区分“root 已取得但 untrusted_app 无法直接调用 su”和“preloader 没有取得 root”。
 
 ## 进度
 
@@ -110,5 +112,7 @@ preloader 结合，保持实验开关，不能把公开项目的互相矛盾直�
 - [x] 增加 opt-in App-UID Android 入口与 per-boot fail-closed guard
 - [x] CI 编译实验 APK（`37960284218`，preloader hash 验收通过）
 - [x] 实验分支额外上传保持 APK 容器完整的安装包
+- [x] 封存并核验同 kernel 的公开 X9U App-UID preloader（91720 bytes）
+- [x] 将启动形状改为 `sh -c` + root-side broker，并把 anti-root stop 移到 root 侧
 - [ ] 平板冷启动真机门禁
 - [ ] 重启后再次激活门禁

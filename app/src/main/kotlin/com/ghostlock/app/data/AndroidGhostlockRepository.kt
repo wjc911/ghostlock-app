@@ -54,8 +54,15 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
             // Linux NDK r27 build packaged by the fork's GitHub Actions runner.
             "01C7FE7FEAF5DB79AA239CF76CA7C0DDB909BE9747FCCFAF794A9420D7A4441C",
         )
+        /* Byte-for-byte copy of koaaN's physically validated X9U App-UID
+         * preloader.  The OPD2515 target.h and the X9U target.h are identical
+         * for this kernel release; keep this as a separate artifact so the
+         * CI-built OPD variant cannot silently replace the validated payload. */
+        const val Opd2515X9uPreloaderHash =
+            "32AC2F03F56955C41032157AA53F23590C3F6A1595FCCC025AD991322E07F7F6"
         const val Opd2515Model = "OPD2515"
         const val Opd2515PreloaderTimeoutMs = 30_000L
+        const val Opd2515DirectReadyName = ".opd2515-direct-root-ready"
         /* This is deliberately a build-time opt-in.  The normal fork remains
          * fail-closed until the exact device route has a fresh cold-boot
          * validation record. */
@@ -605,13 +612,15 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
             require(release == Opd2515Release) {
                 "OPD2515 direct kernel gate failed: $release"
             }
-            val source = File(
-                appContext.applicationInfo.nativeLibraryDir,
-                "libopd2515_preload.so",
-            )
+            val nativeDir = appContext.applicationInfo.nativeLibraryDir
+            val validatedSource = File(nativeDir, "libopd2515_x9u_preload.so")
+            val source = if (validatedSource.isFile) validatedSource else {
+                File(nativeDir, "libopd2515_preload.so")
+            }
             require(source.isFile) { "missing OPD2515 preloader: ${source.absolutePath}" }
             val sourceHash = sha256(source).uppercase(Locale.ROOT)
-            require(sourceHash in Opd2515PreloaderHashes) {
+            require(sourceHash in Opd2515PreloaderHashes ||
+                sourceHash == Opd2515X9uPreloaderHash) {
                 "unrecognized OPD2515 preloader SHA-256: $sourceHash"
             }
 
@@ -659,7 +668,37 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
 
             val nativeLog = File(filesDir, ".ghostlock-opd2515-direct-$bootId.log")
             if (nativeLog.exists()) require(nativeLog.delete()) { "cannot remove stale direct log" }
-            val command = ProcessBuilder("/system/bin/id")
+            val ready = File(filesDir, Opd2515DirectReadyName)
+            require(!Files.isSymbolicLink(ready.toPath())) {
+                "OPD2515 direct ready marker is a symbolic link"
+            }
+            if (ready.exists()) require(ready.delete()) { "cannot remove stale root-ready marker" }
+            val broker = File(filesDir, ".opd2515-direct-root-broker.sh")
+            broker.writeText(
+                "#!/system/bin/sh\n" +
+                    "HOME_DIR=\"${filesDir.absolutePath}\"\n" +
+                    "READY=\"\$HOME_DIR/$Opd2515DirectReadyName\"\n" +
+                    "TMP=\"\$READY.tmp.\$\$\"\n" +
+                    "if [ \"\$(id -u)\" != \"0\" ]; then exit 41; fi\n" +
+                    "for name in exsystemservice com.oplus.exsystemservice oplus_kevent; do " +
+                    "for pid in \$(pidof \$name 2>/dev/null); do kill -STOP \$pid 2>/dev/null; done; " +
+                    "done\n" +
+                    "{ echo root=1; id; echo boot=$bootId; } >\"\$TMP\"\n" +
+                    "chmod 0644 \"\$TMP\" 2>/dev/null || true\n" +
+                    "mv -f \"\$TMP\" \"\$READY\"\n" +
+                    "sleep 15\n",
+            )
+            require(broker.setReadable(true, true) && broker.setExecutable(true, true)) {
+                "cannot prepare OPD2515 root broker"
+            }
+            val launch =
+                "/system/bin/sh ${shellQuote(broker.absolutePath)} " +
+                    "</dev/null >${shellQuote(nativeLog.absolutePath)} 2>&1 &"
+            /* Match the validated X9U app flow: the preloader is loaded by a
+             * normal system shell started from the app, and the root-side
+             * broker is spawned by that same shell after the constructor has
+             * obtained uid 0. */
+            val command = ProcessBuilder("/system/bin/sh", "-c", launch)
                 .directory(filesDir)
                 .redirectErrorStream(true)
                 .redirectOutput(nativeLog)
@@ -698,22 +737,22 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
              * after the native payload has installed a working daemon.  Use
              * the native root summary as the primary handoff proof and keep
              * the Java postflight best-effort. */
+            val brokerDeadline = System.currentTimeMillis() + 5_000L
+            while (!ready.isFile && System.currentTimeMillis() < brokerDeadline) {
+                Thread.sleep(100L)
+            }
+            val brokerReady = ready.isFile && ready.readText().contains("root=1")
             val nativeRootReady = nativeText.contains("direct-root-summary root=1") &&
                 nativeText.contains("su=1/")
             if (!nativeRootReady) {
                 return@withContext if (code == 0) 1 else code
             }
-
-            val postflight = runOpd2515DirectPostflight(onLog)
-            if (postflight) {
-                0
-            } else {
-                onLog(
-                    "<s> OPD2515 direct: native root handoff is ready; " +
-                        "Java-side su postflight was unavailable",
-                )
-                0
+            if (!brokerReady) {
+                onLog("<s> OPD2515 direct: native root proof exists but root broker marker is absent")
+                return@withContext 1
             }
+            onLog("<b> OPD2515 direct: root broker confirmed uid=0 and anti-root guard stop")
+            0
         } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {
@@ -730,6 +769,9 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
         }
         return process.inputStream.bufferedReader().use { it.readText().trim() }
     }
+
+    private fun shellQuote(value: String): String =
+        "'" + value.replace("'", "'\\''") + "'"
 
     private fun isUnsafeBootReason(reason: String): Boolean =
         reason.contains("kernel_panic", ignoreCase = true) ||

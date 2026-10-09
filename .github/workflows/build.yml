@@ -135,7 +135,9 @@ jobs:
               raise SystemExit(f'expected one release APK, found {apk!r}')
           with zipfile.ZipFile(apk[0]) as archive:
               data = archive.read('lib/arm64-v8a/libopd2515_preload.so')
+              x9u = archive.read('lib/arm64-v8a/libopd2515_x9u_preload.so')
           digest = hashlib.sha256(data).hexdigest().upper()
+          x9u_digest = hashlib.sha256(x9u).hexdigest().upper()
           known = {
               '01C7FE7FEAF5DB79AA239CF76CA7C0DDB909BE9747FCCFAF794A9420D7A4441C': 91424,
               'CCB15ABD51BB1B1122FF8E916CBE9DB89D3DC6BB162E8111335ED7B02B8FD4EE': 91720,
@@ -144,7 +146,13 @@ jobs:
               raise SystemExit(
                   f'unknown OPD2515 preloader size/hash: {len(data)} {digest}'
               )
+          if x9u_digest != '32AC2F03F56955C41032157AA53F23590C3F6A1595FCCC025AD991322E07F7F6' \
+                  or len(x9u) != 91720:
+              raise SystemExit(
+                  f'unknown validated X9U preloader size/hash: {len(x9u)} {x9u_digest}'
+              )
           print(f'OPD2515 packaged preloader size={len(data)} sha256={digest}')
+          print(f'validated X9U App-UID preloader size={len(x9u)} sha256={x9u_digest}')
           PY
 
       - name: Strip Ghostlock binary
