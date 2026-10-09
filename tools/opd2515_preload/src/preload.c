@@ -7,44 +7,6 @@
 #define SU_SOCK "/data/local/tmp/temp_su.sock"
 #define SU_LOG "/data/local/tmp/su_daemon.log"
 
-int stop_oplus_exsystemservice(void) {
-  DIR *dir = opendir("/proc");
-  if (!dir) {
-    pr_warning("anti-root guard: cannot open /proc errno=%d\n", errno);
-    return 0;
-  }
-
-  int stopped = 0;
-  struct dirent *entry;
-  while ((entry = readdir(dir)) != NULL) {
-    char *end = NULL;
-    long pid_long = strtol(entry->d_name, &end, 10);
-    if (!end || *end || pid_long <= 1 || pid_long > INT32_MAX) {
-      continue;
-    }
-    char path[64];
-    snprintf(path, sizeof(path), "/proc/%ld/comm", pid_long);
-    char comm[64];
-    read_first_line(path, comm, sizeof(comm));
-    if (strcmp(comm, "exsystemservice") != 0 &&
-        strcmp(comm, "com.oplus.exsystemservice") != 0) {
-      continue;
-    }
-    if (kill((pid_t)pid_long, SIGSTOP) == 0) {
-      pr_success("anti-root guard stopped ExSystemService pid=%ld\n", pid_long);
-      stopped++;
-    } else {
-      pr_warning("anti-root guard could not stop ExSystemService pid=%ld errno=%d\n",
-                 pid_long, errno);
-    }
-  }
-  closedir(dir);
-  if (!stopped) {
-    pr_info("anti-root guard found no running ExSystemService\n");
-  }
-  return stopped;
-}
-
 extern const unsigned char embedded_su_start[];
 extern const unsigned char embedded_su_end[];
 

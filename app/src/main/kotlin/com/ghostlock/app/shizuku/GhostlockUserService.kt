@@ -7,6 +7,8 @@ import com.ghostlock.app.data.NativeProfileDocument
 import java.io.File
 import java.io.RandomAccessFile
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.TimeUnit
+import java.security.MessageDigest
 
 @Keep
 class GhostlockUserService(private val context: Context) : IGhostlockUserService.Stub() {
@@ -168,18 +170,31 @@ class GhostlockUserService(private val context: Context) : IGhostlockUserService
                     context.applicationInfo.nativeLibraryDir,
                     "libopd2515_preload.so",
                 )
+                val guardSource = File(
+                    context.applicationInfo.nativeLibraryDir,
+                    "libopd2515_root_guard.so",
+                )
                 require(source.isFile) { "missing OPD2515 preloader: ${source.absolutePath}" }
+                require(guardSource.isFile) {
+                    "missing OPD2515 root guard: ${guardSource.absolutePath}"
+                }
                 val workDir = File("/data/local/tmp/ghostlock-app").apply {
                     require(isDirectory || mkdirs()) { "cannot create $absolutePath" }
                 }
                 val staged = File(workDir, "libopd2515_preload.so")
+                val stagedGuard = File(workDir, "libopd2515_root_guard.so")
                 source.copyTo(staged, overwrite = true)
+                guardSource.copyTo(stagedGuard, overwrite = true)
                 staged.setReadable(true, false)
                 staged.setExecutable(true, false)
+                stagedGuard.setReadable(true, false)
+                stagedGuard.setExecutable(true, false)
                 val nativeLog = File(workDir, ".ghostlock-opd2515-preloader.log")
                 callback.onLog(
                     "<s> OPD2515 preloader ready: uid=${Process.myUid()} Seccomp=0 " +
-                        "binary=${staged.absolutePath} debugDir=${debugDir ?: "none"}",
+                        "preloader=${staged.absolutePath} guard=${stagedGuard.absolutePath} " +
+                        "preloaderSha256=${sha256(staged)} guardSha256=${sha256(stagedGuard)} " +
+                        "debugDir=${debugDir ?: "none"}",
                 )
 
                 ProcessBuilder("/system/bin/id")
@@ -187,7 +202,10 @@ class GhostlockUserService(private val context: Context) : IGhostlockUserService
                     .redirectErrorStream(true)
                     .redirectOutput(nativeLog)
                     .apply {
-                        environment()["LD_PRELOAD"] = staged.absolutePath
+                        // The guard is first so its fork interposer observes
+                        // the preloader's first root-context fork.
+                        environment()["LD_PRELOAD"] =
+                            "${stagedGuard.absolutePath}:${staged.absolutePath}"
                         environment()["GHOSTLOCK_HOME"] = workDir.absolutePath
                         environment()["TMPDIR"] = workDir.absolutePath
                         environment()["HOME"] = workDir.absolutePath
@@ -201,10 +219,14 @@ class GhostlockUserService(private val context: Context) : IGhostlockUserService
                             isDaemon = true
                             start()
                         }
-                        val code = process.waitFor()
+                        var code = process.waitFor()
                         callback.onLog("<b> OPD2515 preloader exited code=$code")
                         tailer.interrupt()
                         tailer.join(1000)
+                        if (code == 0) {
+                            val postflight = runRootPostflight(callback)
+                            if (!postflight) code = 1
+                        }
                         code
                     }
             }.getOrElse { error ->
@@ -214,6 +236,68 @@ class GhostlockUserService(private val context: Context) : IGhostlockUserService
             running.set(false)
             runCatching { callback.onComplete(exitCode) }
         }, "ghostlock-opd2515-preloader").start()
+    }
+
+    private fun sha256(file: File): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        file.inputStream().use { input ->
+            val buffer = ByteArray(16 * 1024)
+            while (true) {
+                val count = input.read(buffer)
+                if (count < 0) break
+                digest.update(buffer, 0, count)
+            }
+        }
+        return digest.digest().joinToString("") { byte ->
+            (byte.toInt() and 0xff).toString(16).padStart(2, '0')
+        }
+    }
+
+    /**
+     * Complete the volatile handoff after the preloader process exits.  The
+     * command is intentionally idempotent: it only sends SIGSTOP to the three
+     * known OPPO anti-root process names and then probes the temporary su
+     * daemon.  It never writes a partition or a persistent property.
+     */
+    private fun runRootPostflight(callback: IGhostlockCallback): Boolean {
+        val su = File("/data/local/tmp/su")
+        if (!su.isFile) {
+            callback.onLog("<s> root postflight: temporary su is missing")
+            return false
+        }
+        val stopCommand =
+            "for name in exsystemservice com.oplus.exsystemservice oplus_kevent; " +
+                "do for pid in \$(pidof \$name 2>/dev/null); do kill -STOP \$pid; " +
+                "done; done"
+        val stop = runRootCommand(su, stopCommand)
+        if (stop.output.isNotBlank()) {
+            callback.onLog("<s> root postflight output: ${stop.output.trim()}")
+        }
+        callback.onLog("<s> root postflight anti-root scan exit=${stop.code}")
+        if (stop.code != 0) return false
+
+        val probe = runRootCommand(su, "id")
+        callback.onLog(
+            "<s> root handoff probe exit=${probe.code} output=${probe.output.trim()}",
+        )
+        return probe.code == 0 && Regex("(^|\\s)uid=0(?:\\(|\\s|$)").containsMatchIn(probe.output)
+    }
+
+    private data class RootCommandResult(val code: Int, val output: String)
+
+    private fun runRootCommand(su: File, command: String): RootCommandResult {
+        val process = ProcessBuilder(su.absolutePath, "-c", command)
+            .redirectErrorStream(true)
+            .start()
+        val finished = process.waitFor(5, TimeUnit.SECONDS)
+        if (!finished) {
+            process.destroyForcibly()
+            return RootCommandResult(124, "timeout")
+        }
+        return RootCommandResult(
+            process.exitValue(),
+            process.inputStream.bufferedReader().use { it.readText() },
+        )
     }
 
     private fun relayLogSimple(logFile: File, callback: IGhostlockCallback) {

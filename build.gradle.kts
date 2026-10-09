@@ -131,7 +131,7 @@ tasks.register<Exec>("buildOpd2515Preload") {
     val ndk = resolveNdkDir()
     workingDir(file("tools/opd2515_preload"))
     commandLine(
-        "make", "clean", "preload",
+        "make", "clean", "all",
         "API=35",
         "NDK_ROOT=$ndk",
         "NDK_PREBUILT=linux-x86_64",
@@ -143,6 +143,7 @@ tasks.register<Exec>("buildOpd2515Preload") {
         file("tools/opd2515_preload/Makefile"),
     )
     outputs.file(file("tools/opd2515_preload/build/bin/preload.so"))
+    outputs.file(file("tools/opd2515_preload/build/bin/root_guard.so"))
 }
 
 tasks.register<Copy>("prepareOpd2515PreloadJniLibs") {
@@ -151,6 +152,14 @@ tasks.register<Copy>("prepareOpd2515PreloadJniLibs") {
     from("tools/opd2515_preload/build/bin/preload.so")
     into("app/src/main/jniLibs/arm64-v8a")
     rename { "libopd2515_preload.so" }
+}
+
+tasks.register<Copy>("prepareOpd2515GuardJniLibs") {
+    description = "prepareOpd2515GuardJniLibs"
+    dependsOn("buildOpd2515Preload")
+    from("tools/opd2515_preload/build/bin/root_guard.so")
+    into("app/src/main/jniLibs/arm64-v8a")
+    rename { "libopd2515_root_guard.so" }
 }
 
 tasks.register<Exec>("buildGhostlockExtract") {
