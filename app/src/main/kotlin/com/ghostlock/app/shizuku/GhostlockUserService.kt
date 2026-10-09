@@ -202,9 +202,13 @@ class GhostlockUserService(private val context: Context) : IGhostlockUserService
                     // /data/local/tmp is shared and world-writable. Keep this
                     // staging directory private to the shell owner so another
                     // app cannot replace the payload between hash and exec.
-                    require(setReadable(true, false)) { "cannot make $absolutePath readable" }
+                    require(setReadable(false, false) && setReadable(true, true)) {
+                        "cannot make $absolutePath owner-readable"
+                    }
                     require(setWritable(true, true)) { "cannot make $absolutePath writable" }
-                    require(setExecutable(true, false)) { "cannot make $absolutePath searchable" }
+                    require(setExecutable(false, false) && setExecutable(true, true)) {
+                        "cannot make $absolutePath owner-searchable"
+                    }
                 }
                 val bootId = File("/proc/sys/kernel/random/boot_id").readText().trim()
                 require(bootId.isNotEmpty()) { "kernel boot_id is unavailable; refusing preloader" }
@@ -256,9 +260,13 @@ class GhostlockUserService(private val context: Context) : IGhostlockUserService
                 // earlier boot is never overwritten in-place.
                 val staged = File(workDir, "libopd2515_preload-$bootId.so")
                 source.copyTo(staged, overwrite = true)
-                require(staged.setReadable(true, false)) { "cannot make staged preloader readable" }
+                require(staged.setReadable(false, false) && staged.setReadable(true, true)) {
+                    "cannot make staged preloader owner-readable"
+                }
                 require(staged.setWritable(false, false)) { "cannot make staged preloader immutable" }
-                require(staged.setExecutable(true, false)) { "cannot make staged preloader executable" }
+                require(staged.setExecutable(false, false) && staged.setExecutable(true, true)) {
+                    "cannot make staged preloader owner-executable"
+                }
                 require(sha256(staged).uppercase() == sourceHash) {
                     "staged OPD2515 preloader hash changed during copy"
                 }
