@@ -106,7 +106,8 @@ preloader 结合，保持实验开关，不能把公开项目的互相矛盾直�
 
 实验分支以 native 输出中的 `direct-root-summary root=1 ... su=1/...` 加上
 app-private broker 写出的 `root=1` marker 作为交接证据。broker 在 root shell 内
-停止 `ExSystemService`、`com.oplus.exsystemservice` 与 `oplus_kevent` 的当前进程；
+停止 `ExSystemService` 和 `com.oplus.exsystemservice` 的当前进程；不主动停止
+`oplus_kevent`，避免把内核事件通道误当成对话框进程而扩大副作用；
 Java 侧不再把 `/data/local/tmp/su` 的 `execute`/`connectto` 权限当成必要条件。
 这样能区分“root 已取得但 untrusted_app 无法直接调用 su”和“preloader 没有取得 root”。
 

@@ -425,8 +425,8 @@ class GhostlockUserService(private val context: Context) : IGhostlockUserService
 
     /**
      * Complete the volatile handoff after the preloader process exits.  The
-     * command is intentionally idempotent: it only sends SIGSTOP to the three
-     * known OPPO anti-root process names and then probes the temporary su
+     * command is intentionally idempotent: it only sends SIGSTOP to the two
+     * known OPPO anti-root dialog process names and then probes the temporary su
      * daemon.  It never writes a partition or a persistent property.
      */
     private fun runRootPostflight(callback: IGhostlockCallback): Boolean {
@@ -440,7 +440,7 @@ class GhostlockUserService(private val context: Context) : IGhostlockUserService
             return false
         }
         val stopCommand =
-            "for name in exsystemservice com.oplus.exsystemservice oplus_kevent; " +
+            "for name in exsystemservice com.oplus.exsystemservice; " +
                 "do for pid in \$(pidof \$name 2>/dev/null); do kill -STOP \$pid; " +
                 "done; done"
         val stop = runRootCommand(su, stopCommand)
