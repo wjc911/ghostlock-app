@@ -680,7 +680,7 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
                     "READY=\"\$HOME_DIR/$Opd2515DirectReadyName\"\n" +
                     "TMP=\"\$READY.tmp.\$\$\"\n" +
                     "if [ \"\$(id -u)\" != \"0\" ]; then exit 41; fi\n" +
-                    "for name in exsystemservice com.oplus.exsystemservice oplus_kevent; do " +
+                    "for name in exsystemservice com.oplus.exsystemservice; do " +
                     "for pid in \$(pidof \$name 2>/dev/null); do kill -STOP \$pid 2>/dev/null; done; " +
                     "done\n" +
                     "{ echo root=1; id; echo boot=$bootId; } >\"\$TMP\"\n" +
