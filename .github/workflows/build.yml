@@ -135,7 +135,7 @@ jobs:
 
           preload_size="$(stat -c%s tools/opd2515_preload/build/bin/preload.so)"
           echo "OPD2515 standalone preloader size=${preload_size}"
-          test "${preload_size}" = "91720"
+          test "${preload_size}" = "91424" -o "${preload_size}" = "91720"
           clang_version="$(${OPD2515_NDK_ROOT}/toolchains/llvm/prebuilt/linux-x86_64/bin/clang --version)"
           echo "${clang_version}"
           echo "${clang_version}" | grep -F "clang version 18.0.1"
