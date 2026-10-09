@@ -151,3 +151,29 @@ flowchart TD
   FAIL，不自动重试。
 - 旧的 `result_stack` 入口保留为实验路径，直到新入口完成上述门禁；不把
   失败批次标为 supported。
+
+## 2026-10-09 崩溃复盘与入口隔离
+
+设备本次启动后的 `ro.boot.bootreason` 为
+`kernel_panic,ubsan:_array_index_out_of_bounds:_fatal_exception`，不是
+此前 OPPO anti-root 计时器使用的
+`reboot,malicious_app_try_to_root_devices`。本次运行前应用界面中的
+Shizuku 选项处于开启状态，而 `GhostlockUserService` 固定启动通用的
+`libghostlock.so`，不会选择 OPD2515 专用 `libopd2515_preload.so`。由于
+崩溃后没有保留下来的 pstore 调用栈，不能把具体 UBSAN 指令位置说成已
+定位；现有证据把这次事件归类为“通用 Shizuku/result-stack 入口失败”。
+
+独立的 OPD2515 preloader 日志（设备上的 `/data/local/tmp/preload.out`，
+2026-10-09 00:51）记录了同一精确内核上的 `shift=14`、KASLR 泄漏、
+`uid=0`、临时 `su` 和 anti-root 进程停止，说明它至少有一次完成了整条
+直接入口。精确 vmlinux 反汇编也显示
+`futex_wait_requeue_pi` 将 `sp+0xa0` 作为 `rt_mutex_waiter` 传给
+`rt_mutex_wait_proxy_lock`，与 14 个 qword 的 preloader payload 相符；
+先前“shift=14 必然落在 futex_q、应改为 28”的静态假设已撤回，不能再用
+它指导变体试验。
+
+为防止用户误把通用 Shizuku 路径再次运行，应用层对精确 OPD2515 现在会
+拒绝 Shizuku 入口；默认 profile 也不再自动勾选 Shizuku。直接入口仍然
+只在型号、内核 release、`result_stack` profile 和专用 preloader 同时匹配
+时选择，下一次真机测试前仍需保留完整启动证据，并把任何 panic/reboot
+记为失败，不自动尝试 shift 变体。
