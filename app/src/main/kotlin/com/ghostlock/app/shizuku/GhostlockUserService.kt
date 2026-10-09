@@ -231,7 +231,7 @@ class GhostlockUserService(private val context: Context) : IGhostlockUserService
                         while (true) {
                             val byte = handle.read()
                             if (byte == -1) break
-                            if (byte == '\\n'.code) {
+                            if (byte == '\n'.code) {
                                 val line = pending.toString()
                                 pending.clear()
                                 offset = handle.filePointer

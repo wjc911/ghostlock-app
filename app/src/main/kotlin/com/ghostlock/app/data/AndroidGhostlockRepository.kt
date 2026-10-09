@@ -463,9 +463,10 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
                         profileBlob = profileBlob,
                         debugDir = debugDir,
                         onLog = archivedLog,
-                    ) { step, status ->
-                        if (status == "disabled") clearRunState() else applyRunStatus(step, status)
-                    }
+                        onStatus = { step, status ->
+                            if (status == "disabled") clearRunState() else applyRunStatus(step, status)
+                        },
+                    )
                 }
             }
         }
