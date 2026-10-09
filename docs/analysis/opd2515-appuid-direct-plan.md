@@ -68,7 +68,7 @@ root 与 `su` daemon 本身是易失状态，重启后消失。源码回滚只�
 | 批次 | 验证 | 通过条件 |
 | --- | --- | --- |
 | A | Kotlin/Gradle unit tests | 编译通过，普通构建 `BuildConfig=false` |
-| B | APK 静态检查 | 仅 arm64 包含 preloader；hash 为 `CCB15...F4EE`；实验 APK 字段为 true |
+| B | APK 静态检查 | 仅 arm64 包含 preloader；hash 为已知的 `CCB15...F4EE`（Windows）或 `01C7...441C`（CI Linux）；实验 APK 字段为 true |
 | C | 平板干净启动 | bootreason 无 panic，首次运行只执行一次，日志含 target/hash |
 | D | 临时 root | 日志含 `uid=0`、`su daemon ready`、postflight `uid=0`，设备 30 秒不重启 |
 | E | 重启复测 | root/marker 旧状态不被误用；新 boot 可在用户主动点击后再次尝试 |

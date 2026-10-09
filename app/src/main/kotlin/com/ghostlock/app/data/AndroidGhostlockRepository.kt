@@ -48,8 +48,12 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
         const val ExtractBinaryName = "libextract.so"
         const val Opd2515Release =
             "6.12.58-android16-6-g7704a1ae279b-ab15213644-4k"
-        const val Opd2515PreloaderHash =
-            "CCB15ABD51BB1B1122FF8E916CBE9DB89D3DC6BB162E8111335ED7B02B8FD4EE"
+        val Opd2515PreloaderHashes = setOf(
+            // Windows NDK r27 build used during local reconstruction.
+            "CCB15ABD51BB1B1122FF8E916CBE9DB89D3DC6BB162E8111335ED7B02B8FD4EE",
+            // Linux NDK r27 build packaged by the fork's GitHub Actions runner.
+            "01C7FE7FEAF5DB79AA239CF76CA7C0DDB909BE9747FCCFAF794A9420D7A4441C",
+        )
         const val Opd2515Model = "OPD2515"
         const val Opd2515PreloaderTimeoutMs = 30_000L
         /* This is deliberately a build-time opt-in.  The normal fork remains
@@ -607,7 +611,7 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
             )
             require(source.isFile) { "missing OPD2515 preloader: ${source.absolutePath}" }
             val sourceHash = sha256(source).uppercase(Locale.ROOT)
-            require(sourceHash == Opd2515PreloaderHash) {
+            require(sourceHash in Opd2515PreloaderHashes) {
                 "unrecognized OPD2515 preloader SHA-256: $sourceHash"
             }
 
