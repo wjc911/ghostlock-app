@@ -161,12 +161,22 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
 
     override suspend fun snapshot(): KernelSnapshot {
         val release = System.getProperty("os.version", "unknown").orEmpty()
+        val exactOpd2515Blocked = isOpd2515Target(release) && !Opd2515PreloaderValidated
         /* PROFILE-SUGGEST-01: recommend_shizuku is a suggestion. It seeds the
          * toggle until the user makes an explicit choice, which then overrides
          * it in both directions. */
-        val recommendShizuku = release in builtinProfiles.recommendShizuku ||
-            importedOffsetsRecommendShizuku(release)
-        val shizukuActive = if (shizukuPreferenceSet) shizukuEnabled else recommendShizuku
+        val recommendShizuku = !exactOpd2515Blocked &&
+            (release in builtinProfiles.recommendShizuku || importedOffsetsRecommendShizuku(release))
+        // Do not let a stale preference make a fail-closed exact target look
+        // runnable or request a fresh Shizuku grant. The preference itself is
+        // retained so a future, separately validated profile can opt in again.
+        val shizukuActive = if (exactOpd2515Blocked) {
+            false
+        } else if (shizukuPreferenceSet) {
+            shizukuEnabled
+        } else {
+            recommendShizuku
+        }
         return KernelSnapshot(
             deviceName = resolveDeviceName(),
             kernelRelease = release,
