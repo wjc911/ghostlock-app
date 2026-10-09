@@ -151,3 +151,179 @@ flowchart TD
   FAIL，不自动重试。
 - 旧的 `result_stack` 入口保留为实验路径，直到新入口完成上述门禁；不把
   失败批次标为 supported。
+
+## 2026-10-09 崩溃复盘与入口隔离
+
+设备本次启动后的 `ro.boot.bootreason` 为
+`kernel_panic,ubsan:_array_index_out_of_bounds:_fatal_exception`，不是
+此前 OPPO anti-root 计时器使用的
+`reboot,malicious_app_try_to_root_devices`。本次运行前应用界面中的
+Shizuku 选项处于开启状态，而 `GhostlockUserService` 固定启动通用的
+`libghostlock.so`，不会选择 OPD2515 专用 `libopd2515_preload.so`。由于
+崩溃后没有保留下来的 pstore 调用栈，不能把具体 UBSAN 指令位置说成已
+定位；现有证据把这次事件归类为“通用 Shizuku/result-stack 入口失败”。
+
+独立的 OPD2515 preloader 日志（设备上的 `/data/local/tmp/preload.out`，
+2026-10-09 00:51）记录了同一精确内核上的 `shift=14`、KASLR 泄漏、
+`uid=0`、临时 `su` 和 anti-root 进程停止，说明它至少有一次完成了整条
+直接入口。精确 vmlinux 反汇编也显示
+`futex_wait_requeue_pi` 将 `sp+0xa0` 作为 `rt_mutex_waiter` 传给
+`rt_mutex_wait_proxy_lock`，与 14 个 qword 的 preloader payload 相符；
+先前“shift=14 必然落在 futex_q、应改为 28”的静态假设已撤回，不能再用
+它指导变体试验。
+
+为防止用户误把通用 Shizuku 路径再次运行，上一版应用层曾对精确 OPD2515
+拒绝 Shizuku 入口，并关闭默认推荐。该入口隔离只适用于旧的通用
+`libghostlock.so` 路径；批次 E 改为显式选择 shell UID 专用 preloader。
+应用 UID direct 入口仍必须拒绝，下一次真机测试前仍需保留完整启动证据，
+并把任何 panic/reboot 记为失败，不自动尝试 shift 变体。
+
+## 2026-10-09 11:19 直接 preloader 复测失败
+
+在密码已关闭、Shizuku 明确关闭的条件下，应用日志
+`Download/ghostlock-debug-log/20261009-111901/ghostlock-direct-0.log`
+确认本次确实进入了 OPD2515 专用 `libopd2515_preload.so`，而不是通用
+`libghostlock.so`。日志显示：
+
+- `shift=14` 的 KASLR 泄漏阶段完成，`slide-kaslr-ok` 成功；
+- `per_cpu_offset`、`entry_task` 两次读回通过；
+- 读取 `selinux_enforcing` 得到 `raw=0100000101010101`，不是合法的 0/1，
+  但代码随后按“无法读取则假定 enforcing=1”继续；
+- 在第一次真实内核写入 `install_real_cred`（`direct-w64[3]`）之后日志
+  截断，设备自动重启。
+
+重启后 `ro.boot.bootreason` 为
+`kernel_panic,ubsan:_array_index_out_of_bounds:_fatal_exception`，普通
+shell 仍为 uid 2000，`/sys/fs/pstore` 没有可读的内核 console/ramoops
+调用栈。因此，之前 `/data/local/tmp/preload.out` 中一次成功的旧日志不能
+作为稳定性证据；本次结果把直接 preloader 也定为 FAIL。当前不能再运行
+任何 shift 变体、通用 Shizuku 路径或重复 direct 路径，必须先离线修复
+result-set 读写验证和失败即停止的门禁。
+
+## 批次 E：shell UID 专用 preloader 入口（设计，2026-10-09）
+
+应用 UID 10045 的 direct 复测在第一次真实写入前已经读到非法的
+`selinux_enforcing` 值，并在 `install_real_cred` 后触发 UBSAN。旧的成功
+记录来自 shell UID 2000，且没有经过当前应用的 seccomp 环境。因此，下一批
+只研究 UID/环境差异，不再让应用进程直接加载 preloader。
+
+### 目标与约束
+
+- Shizuku UserService 只负责以 shell UID、`Seccomp=0` 启动精确的
+  `libopd2515_preload.so`；不得调用通用 `libghostlock.so`。
+- 精确 OPD2515 的应用 UID direct 入口必须早拒绝；不能让用户误触发已失败
+  的路径。
+- 不改变其他设备的 route、profile 或 Shizuku 行为；不写分区，不解锁 BL。
+- 任何真机测试前，必须先验证 UserService 的 UID/seccomp、二进制 hash 和
+  日志目录；panic/reboot 立即判 FAIL，不自动重试。
+
+### 改动清单
+
+| 文件 | 改动 | 理由 |
+|---|---|---|
+| `app/src/main/aidl/com/ghostlock/app/shizuku/IGhostlockUserService.aidl` | 增加专用 `runOpd2515Preloader` 调用 | 显式区分 shell preloader 与通用 native route |
+| `app/src/main/kotlin/com/ghostlock/app/shizuku/GhostlockUserService.kt` | 校验 shell UID/`Seccomp=0`，启动 APK 内精确 preloader 并转发日志 | 复现旧成功日志的执行环境，避免应用 UID seccomp |
+| `app/src/main/kotlin/com/ghostlock/app/shizuku/ShizukuExploitRunner.kt` | 增加专用 UserService 调用与连接生命周期 | 保持 Binder/回调清理边界明确 |
+| `app/src/main/kotlin/com/ghostlock/app/data/AndroidGhostlockRepository.kt` | exact OPD2515 的 direct 入口早拒绝；Shizuku 入口选择专用调用 | 防止再次触发已失败 direct 路径 |
+| `app/src/main/assets/kernel_profiles/6.12.58-...conf` | 将 `recommend_shizuku` 设为 1，并注明这是专用入口 | 新包默认走 shell UID 入口 |
+| `app/build.gradle.kts` / CI 调用 | 使用独立 fork applicationId，避免与原包签名冲突 | 不卸载现有 GhostLock，不覆盖其数据 |
+
+### 验证矩阵
+
+1. `:profile-core:test`、`:app:testDebugUnitTest` 和 CI APK 构建通过。
+2. 新 APK 独立安装后只读确认包名、APK/SO SHA-256、Shizuku 状态。
+3. 首次真机运行只允许专用 shell preloader；成功标准同时包括
+   `uid=0`、`direct-root-summary root=1`、`su` socket 和无 panic。
+4. 失败时只收集日志和 `bootreason`，不重试、不切换 shift。
+
+## 批次 F：独立 anti-root guard 与一键入口（2026-10-09）
+
+批次 E 的入口已经把执行环境固定到 Shizuku shell UID，但现有源码仍把
+`ExSystemService` 停止逻辑编译进 preloader。这个内置逻辑会改变已验证
+preloader 的函数布局和时序；而 OPD2515 的 anti-root 组件实际使用的
+进程名是 `exsystemservice`，不是包名。批次 F 将两件事分离：保持
+preloader 的攻击代码和编译输入不变，在同一个 `LD_PRELOAD` 链中放置一个
+很小的 guard，guard 只在当前线程已经变成 uid 0、即将第一次 `fork()` 时
+冻结 `exsystemservice`、`com.oplus.exsystemservice` 和 `oplus_kevent`。
+
+### 设计决定
+
+- `tools/opd2515_preload/src/preload.c`、`main.c` 和 `common.h` 删除内置
+  anti-root 停止函数及其调用；不调整 result-set、slide、cred 写入或
+  embedded `su` 的顺序和参数。
+- 新增 `src/root_guard.c`，通过 `fork()` 的动态链接拦截在 root 身份建立
+  后扫描 `/proc/*/comm`，只发送 `SIGSTOP`；它不改分区、不改启动属性，
+  不负责凭据提升。
+- Makefile 和 Gradle 同时构建、打包 `libopd2515_preload.so` 与
+  `libopd2515_root_guard.so`。APK 运行时按 guard:preloader 顺序加载，
+  并把两份 SHA-256 写入本次调试日志。
+- preloader 结束后由 root daemon 做一次幂等 postflight 扫描，补停在竞争
+  窗口内重新出现的同名进程；随后执行 `su -c id` 作为 handoff 门禁。任何
+  一个库缺失、UserService 不是 shell UID、Seccomp 非 0 或 su 探针失败，
+  都返回失败，不把一次半成功报告成 root。
+- 精确 OPD2515 仍只能从 Shizuku UserService 启动；应用 UID 的旧
+  `runOpd2515Preloader` 分支删除，普通设备和既有 route 不改变。
+
+### 入口数据流
+
+```mermaid
+flowchart TD
+    A[exact model + uname 校验] --> B[Shizuku UserService]
+    B --> C[shell UID / Seccomp=0 门禁]
+    C --> D[stage guard + preloader 并记录 hash]
+    D --> E[LD_PRELOAD guard:preloader /system/bin/id]
+    E --> F[一次性内核提权与临时 su daemon]
+    F --> G[guard 在 root fork 前 SIGSTOP anti-root 进程]
+    G --> H[su postflight 再扫描并核验 id]
+    H --> I[回报成功；重启后 daemon 与 SIGSTOP 消失]
+```
+
+### 改动清单
+
+| 文件 | 改动 | 理由 |
+|---|---|---|
+| `tools/opd2515_preload/src/preload.c`、`main.c`、`common.h` | 删除内置 anti-root 停止代码 | 保持历史 preloader 攻击布局 |
+| `tools/opd2515_preload/src/root_guard.c` | 新增独立、可审计的进程 guard | 把反 root 处理与 exploit 解耦 |
+| `tools/opd2515_preload/Makefile` | 增加 `root_guard.so` 构建目标 | 确保 guard 来自源码并可重复构建 |
+| `build.gradle.kts`、`app/build.gradle.kts` | 构建并打包两份 arm64 JNI 库 | APK 一键入口需要两份输入 |
+| `GhostlockUserService.kt` | stage 两份库、设置 LD_PRELOAD、postflight、hash/门禁日志 | 只允许精确 shell 路径成功 |
+| `AndroidGhostlockRepository.kt` | 删除应用 UID 旧 preloader 分支并保持 fail-closed | 防止误触发已失败路径 |
+| `docs/analysis/device-gates/OPD2515-preloader.md` | 记录冷机安装、运行、重启后复核 | 给成功和 panic/reboot 都留下证据 |
+
+### 验证门槛
+
+1. 源码检查确认 preloader 不再引用 `stop_oplus_exsystemservice`，而
+   `root_guard.c` 只包含进程扫描、`SIGSTOP` 和 `fork` 拦截。
+2. ONDK 构建同时产出 arm64 ELF；检查 `readelf -h`、尺寸、SHA-256，
+   并运行仓库现有 host/Kotlin 测试和 CI APK 构建。
+3. 安装 fork APK 后，在不重启的当前设备上只读核对包名、两份库 hash、
+   Shizuku shell UID 和 UserService 日志。
+4. 冷机门禁：点击一次入口，至少观察 30 秒不重启，`su -c id` 为 uid 0，
+   anti-root 目标进程为 stopped/不存在；然后重启，确认普通 shell 为
+   uid 2000、`temp_su.sock` 不可用、未写任何分区。
+5. 任何 kernel panic、自动重启、hash/target 不匹配均为 FAIL；不自动
+   重试 shift 或替换 preloader 二进制。
+
+### 明确保留
+
+- 不修改 `kernelsnitch/`、v1 profile converter、现有三条通用 route。
+- 不提交预编译 exploit 二进制；CI 从 C 源码构建两份库。
+- 不解锁 bootloader，不写 `abl`、`efisp`、`init_boot`、`persist` 或其他
+  分区；所有 guard 状态依赖当前开机，重启即消失。
+
+## 批次 F 进度
+
+- [x] 完成独立 guard 设计和精确进程名核对
+- [x] 删除 preloader 内置 guard 并接入源码构建
+- [x] 完成 APK 打包、CI 构建和安装核对
+- [x] 完成当前设备冷机真机门禁（结果：FAIL，kernel UBSAN reboot）
+- [x] 完成重启后无 root/无 daemon 复核（结果：普通 shell，临时 su 不可用）
+
+### 批次 F 真机结论
+
+本批次证明了入口隔离和日志链路，但没有证明提权成功。Shizuku
+UserService 的 `uid=2000` / `Seccomp=0` 门禁通过，两个 arm64 库的 hash
+也与 APK 一致；首次执行在 `slide requeue` 后触发
+`kernel_panic,ubsan:_array_index_out_of_bounds:_fatal_exception`，设备重启，
+没有 `uid=0` 或 `su` daemon。应用层已把该 exact profile 标为 fail-closed，
+在没有新的离线布局审查和完整真机门禁之前不再运行这条路径。
