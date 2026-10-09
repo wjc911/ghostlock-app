@@ -659,6 +659,24 @@ static int run_direct_root_stage(void) {
     pr_error("direct real_cred install failed\n");
     return 0;
   }
+  /*
+   * The OPD2515 anti-root service starts its reboot timer as soon as this
+   * task becomes uid 0.  The historical route used to wait until the SELinux
+   * follow-up, policy reload, and su handoff had all completed before
+   * freezing that service.  Under scheduler contention that window can exceed
+   * the timer even though the credential write has already succeeded.  Stop
+   * the service immediately after the first credential write, then finish the
+   * remaining credential/SELinux handoff.  This is volatile (SIGSTOP only)
+   * and is safe to repeat at the final postflight.
+   */
+  if (getuid() == 0 || geteuid() == 0) {
+    int early_guard = stop_oplus_exsystemservice();
+    pr_success("early anti-root guard uid=%u euid=%u stopped=%d\n",
+               getuid(), geteuid(), early_guard);
+  } else {
+    pr_warning("early anti-root guard skipped uid=%u euid=%u\n",
+               getuid(), geteuid());
+  }
   if (!direct_trigger_write64_followup(
           "install_cred_then_selinux_zero", cred_slot, init_cred, 1,
           selinux_target, &write_idx)) {
