@@ -60,6 +60,9 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
          * CI-built OPD variant cannot silently replace the validated payload. */
         const val Opd2515X9uPreloaderHash =
             "32AC2F03F56955C41032157AA53F23590C3F6A1595FCCC025AD991322E07F7F6"
+        /** Rebuilt from the public X9U source with the OPD2515 target header and NDK r27. */
+        const val Opd2515X9uOpdRebuiltPreloaderHash =
+            "A4EBA1AE0AB3A9F420DC9B75181F70B49FF725192CF0933F15E36A0861511519"
         const val Opd2515Model = "OPD2515"
         const val Opd2515PreloaderTimeoutMs = 30_000L
         const val Opd2515DirectReadyName = ".opd2515-direct-root-ready"
@@ -613,14 +616,19 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
                 "OPD2515 direct kernel gate failed: $release"
             }
             val nativeDir = appContext.applicationInfo.nativeLibraryDir
+            val targetRebuiltSource = File(nativeDir, "libopd2515_x9u_rebuilt_preload.so")
             val validatedSource = File(nativeDir, "libopd2515_x9u_preload.so")
-            val source = if (validatedSource.isFile) validatedSource else {
-                File(nativeDir, "libopd2515_preload.so")
+            val legacySource = File(nativeDir, "libopd2515_preload.so")
+            val source = when {
+                targetRebuiltSource.isFile -> targetRebuiltSource
+                validatedSource.isFile -> validatedSource
+                else -> legacySource
             }
             require(source.isFile) { "missing OPD2515 preloader: ${source.absolutePath}" }
             val sourceHash = sha256(source).uppercase(Locale.ROOT)
             require(sourceHash in Opd2515PreloaderHashes ||
-                sourceHash == Opd2515X9uPreloaderHash) {
+                sourceHash == Opd2515X9uPreloaderHash ||
+                sourceHash == Opd2515X9uOpdRebuiltPreloaderHash) {
                 "unrecognized OPD2515 preloader SHA-256: $sourceHash"
             }
 
