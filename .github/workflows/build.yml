@@ -183,6 +183,18 @@ jobs:
           path: GhostLock-release.apk
           archive: false
 
+      # Keep an installable APK as a single file as well.  The flattened
+      # artifact above is useful to the existing release pipeline, while the
+      # experimental App-UID branch must be downloadable with its APK
+      # container intact for a real-device gate.
+      - name: Upload Installable APK
+        if: ${{ github.ref == 'refs/heads/opd2515-direct-app-experimental' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: GhostLock-installable-apk
+          path: GhostLock-release.apk
+          archive: true
+
       - name: Upload kernel profiles
         uses: actions/upload-artifact@v7
         with:
